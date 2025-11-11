@@ -1,0 +1,9 @@
+.DS_Store
+build
+vendored
+.cache
+*.swp
+.idea
+.zig-cache
+cmake-build-debug
+cmake-build-release
