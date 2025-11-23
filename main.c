@@ -1,14 +1,20 @@
 #include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 #include <SDL3_image/SDL_image.h>
 #include <SDL3_ttf/SDL_ttf.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 #include "camera/camera.h"
+#include "engine.h"
+#include "profiler.h"
 
 #define WINDOW_WIDTH 1920
 #define WINDOW_HEIGHT 1080
 static int screen_width = WINDOW_WIDTH;
 static int screen_height = WINDOW_HEIGHT;
+
+#define NUM_CIRCLE_SEGMENTS 16 // Adjust for smoother curves
 
 int is_point_in_rect(const float x, const float y,
                      const SDL_FRect *const SDL_RESTRICT rect) {
@@ -205,8 +211,8 @@ Map *create_map(const int width, const int height,
   }
 
   // initialize even on empty, odd on first tile
-  SDL_memset(map->occupied, false,
-             (unsigned int)width * (unsigned int)height * sizeof(bool));
+  memset(map->occupied, false,
+         (unsigned int)width * (unsigned int)height * sizeof(bool));
   for (int i = 0; i < (width * height); i++) {
     int tile_index = i % 2 ? 0 : 36;
     if (i > ((width * height) - (width / 2) * (height / 2))) {
@@ -241,6 +247,7 @@ static float sea_time = 0.0f;
 void render_map(SDL_Renderer *const SDL_RESTRICT renderer,
                 const Map *const SDL_RESTRICT map, const float offset_x,
                 const float offset_y) {
+  PROF_start(PROFILER_RENDER_MAP);
 
   // Calculate tile dimensions
   const float tile_w = (float)map->tileset->tile_width;
@@ -393,6 +400,8 @@ void render_map(SDL_Renderer *const SDL_RESTRICT renderer,
     SDL_RenderLine(renderer, iso_x + iso_w / 2, iso_y, iso_x,
                    iso_y - iso_h / 2.0f);
   }
+
+  PROF_stop(PROFILER_RENDER_MAP);
 }
 
 typedef struct WireframeMesh_ {
@@ -559,6 +568,7 @@ void render_building_wireframe(SDL_Renderer *const SDL_RESTRICT renderer,
                                const float iso_w, const float iso_h,
                                const int bw, const int bl, const int sw,
                                const int sh) {
+  PROF_start(PROFILER_RENDER_WIREFRAMES);
   SDL_SetRenderDrawColor(renderer, 0, 255, 255, 255);
 
   const float tile_h = iso_h * 2.0f;
@@ -610,6 +620,8 @@ void render_building_wireframe(SDL_Renderer *const SDL_RESTRICT renderer,
 
   // TODO finish the top later wireframe. rethink how to do that since 2x2
   // building size would make it not render completely I think.
+
+  PROF_stop(PROFILER_RENDER_WIREFRAMES);
 }
 
 // TODO: test times with x buildings with restrict on map, ts and rs.
@@ -618,6 +630,7 @@ void render_buildings(SDL_Renderer *const renderer, const Map *const map,
                       const TransformComponent *const ts,
                       const RenderableComponent *const rs, const int b_count,
                       const float offset_x, const float offset_y) {
+  PROF_start(PROFILER_RENDER_BUILDINGS);
 
   const int tile_w = (int)map->tileset->tile_width;
   const int tile_h = (int)map->tileset->tile_height;
@@ -660,6 +673,8 @@ void render_buildings(SDL_Renderer *const renderer, const Map *const map,
     SDL_SetRenderDrawColor(renderer, 0, 255, 255, 255);
 
     if (wireframe_mode) {
+      PROF_stop(PROFILER_RENDER_BUILDINGS);
+      PROF_start(PROFILER_RENDER_WIREFRAMES);
       // render_building_wireframe(renderer, iso_x, iso_y, iso_w, iso_h,
       // buildings[entity].width, buildings[entity].length, bw, bh);
       const WireframeMesh *const m = &wireframe_meshes[entity];
@@ -668,6 +683,8 @@ void render_buildings(SDL_Renderer *const renderer, const Map *const map,
         SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Error rendering geometry: %s",
                      SDL_GetError());
       }
+      PROF_stop(PROFILER_RENDER_WIREFRAMES);
+      PROF_start(PROFILER_RENDER_BUILDINGS);
     }
   }
 
@@ -684,6 +701,8 @@ void render_buildings(SDL_Renderer *const renderer, const Map *const map,
   SDL_RenderTexture(renderer, map->tileset->texture, &src, &dst);
   SDL_SetTextureColorMod(map->tileset->texture, 255, 255, 255);
   SDL_SetTextureAlphaMod(map->tileset->texture, 255);
+
+  PROF_stop(PROFILER_RENDER_BUILDINGS);
 }
 
 // TODO:
@@ -925,9 +944,6 @@ void clean(void) {
     SDL_free(wireframe_meshes[i].verts);
   }
 
-  SDL_GL_DestroyContext(gl_context);
-  SDL_DestroyWindow(opengl_window);
-
   SDL_DestroyRenderer(renderer);
   SDL_DestroyWindow(window);
   TTF_Quit();
@@ -1072,8 +1088,10 @@ int mainLoop(void) {
   float mouse_x = 0.0f, mouse_y = 0.0f;
   SDL_Point mouse_tile = {0, 0};
   while (running) {
+    PROF_frameStart();
     constexpr float square_speed = 15.0f;
 
+    PROF_start(PROFILER_EVENT_HANDLING);
     SDL_Event event;
     while (SDL_PollEvent(&event)) {
       switch (event.type) {
@@ -1277,7 +1295,7 @@ int mainLoop(void) {
 
     /*   -------------------------------------------     SYSTEMS
      * ------------------------------------------   */
-    CAMERA_smooth_zoom_system(&ecs, 1 / 0.0166f,
+    CAMERA_smooth_zoom_system(&ecs, PROF_getLastFrameTime(),
                               (SDL_FPoint){mouse_x, mouse_y});
 
     // Handle continuous key presses
@@ -1308,6 +1326,7 @@ int mainLoop(void) {
     if (square.y + square.h >= (float)screen_height) {
       square.y = (float)screen_height - square.h;
     }
+    PROF_stop(PROFILER_EVENT_HANDLING);
 
     // background color
     SDL_SetRenderDrawColor(renderer, 135, 206, 235, 255);
@@ -1324,6 +1343,7 @@ int mainLoop(void) {
                      offx, offy);
     SDL_SetRenderScale(renderer, 1.f, 1.f);
 
+    PROF_start(PROFILER_RENDER_UI);
     // Render the square
     SDL_SetRenderDrawColor(renderer, square_color.r, square_color.g,
                            square_color.b, square_color.a);
@@ -1461,9 +1481,72 @@ int mainLoop(void) {
 
     SDL_DestroySurface(mousecoords_surface);
 
+    float fps_min, fps_avg, fps_max;
+    PROF_getFPS(&fps_min, &fps_avg, &fps_max);
+    snprintf(fps_text, 64, " Min: %.2f | Avg: %.2f | Max: %.2f ", fps_min,
+             fps_avg, fps_max);
+    SDL_Surface *const fps_surface =
+        TTF_RenderText_LCD(font, fps_text, strlen(fps_text), text_color,
+                           (SDL_Color){0, 0, 0, 125});
+    if (!fps_surface) {
+      SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                   "TTF_RenderText_Blended failed: %s\n", SDL_GetError());
+      SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR,
+                               "TTF_RenderText_Blended failed", SDL_GetError(),
+                               window);
+      TTF_CloseFont(font);
+      SDL_DestroyRenderer(renderer);
+      SDL_DestroyWindow(window);
+      return 1;
+    }
+    SDL_Texture *const fps_texture =
+        SDL_CreateTextureFromSurface(renderer, fps_surface);
+
+    SDL_FRect fps_rect = {20.0f, 20.0f, (float)fps_surface->w,
+                          (float)fps_surface->h};
+    SDL_RenderTexture(renderer, fps_texture, nullptr, &fps_rect);
+
+    SDL_DestroySurface(fps_surface);
+
+    PROF_stop(PROFILER_RENDER_UI);
+
+    /* ------------ PROFILING UI ------------ */
+    PROF_start(PROFILER_GPU);
+    if (debug_mode)
+      PROF_render(renderer, font, (SDL_FPoint){20.0f, 180.0f});
+
+    SDL_RenderPresent(renderer);
+
+    SDL_DestroyTexture(button_texture);
+    SDL_DestroyTexture(mouse_texture);
+    SDL_DestroyTexture(mousetile_texture);
+    SDL_DestroyTexture(camera_scale_texture);
+    SDL_DestroyTexture(mousecoords_texture);
+    SDL_DestroyTexture(fps_texture);
+
+    PROF_stop(PROFILER_GPU);
+
     // SDL_Delay(1);
 
+    // TODO: rethink this, but at least move it to the end of the frame AFTER
+    // RenderPresent(). take fps times from PROF? consistency!
+    /* ------------ WAIT FRAME - FPS COUNTER ------------ */
+    PROF_start(PROFILER_WAIT_FRAME);
+
+    const Uint32 wait_time = (Uint32)PROF_getFrameWaitTime();
+
+    if (wait_time >= 1) {
+      SDL_Delay(wait_time - 1);
+    }
+
+    float dt = PROF_getLastFrameTime() / 1000.0f;
+    sea_time += dt * SDL_PI_F * 2.0f * WAVE_SPEED;
+
     // SDL_LogDebug(SDL_LOG_CATEGORY_CUSTOM, "FPS: %f\n", fps);
+
+    PROF_stop(PROFILER_WAIT_FRAME);
+
+    PROF_frameEnd();
   }
 
   return 0;
