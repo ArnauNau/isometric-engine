@@ -4,8 +4,10 @@
 
 #include "profiler.h"
 
-#include "engine.h"
 #include "SDL3/SDL_timer.h"
+#include "renderer/ui.h"
+
+#include <assert.h>
 
 static const char *const PROF_category_names[] = {
     [PROFILER_EVENT_HANDLING] = "event_handling",
@@ -165,7 +167,7 @@ void PROF_getFPS(float *const SDL_RESTRICT min, float *const SDL_RESTRICT avg, f
 
 
 /* ------------ RENDERING ------------ */
-static SDL_Color hsv_to_rgb(const float hue, const float saturation, const float value) {
+static SDL_FColor hsv_to_fcolor(const float hue, const float saturation, const float value) {
     const float c = value * saturation;
     const float x = c * (1.0f - SDL_fabsf(SDL_fmodf(hue * 6.0f, 2.0f) - 1.0f));
     const float m = value - c;
@@ -185,95 +187,146 @@ static SDL_Color hsv_to_rgb(const float hue, const float saturation, const float
         r = c; g = 0; b = x;
     }
 
-    const SDL_Color color = {
-        (Uint8)((r + m) * 255),
-        (Uint8)((g + m) * 255),
-        (Uint8)((b + m) * 255),
-        255
+    const SDL_FColor color = {
+        (r + m),
+        (g + m),
+        (b + m),
+        1.0f
     };
     return color;
 }
 
-static inline SDL_Color color_for_section(const ProfilerSampleCategory section) {
-    if (section == PROFILER_FRAME_TOTAL) return (SDL_Color){255, 255, 255, 255};
+static inline SDL_FColor fcolor_for_section(const ProfilerSampleCategory section) {
+    if (section == PROFILER_FRAME_TOTAL) return (SDL_FColor){1.0f, 1.0f, 1.0f, 1.0f};
     const float hue = (float)section / (float)PROFILER_FRAME_TOTAL; //distribute hues evenly
     constexpr float saturation = 0.9f; //high saturation for vibrant colors
     constexpr float value = 0.9f; //bright colors
-    return hsv_to_rgb(hue, saturation, value);
+    return hsv_to_fcolor(hue, saturation, value);
 }
 
-static void render_profiler_bar(SDL_Renderer *const SDL_RESTRICT renderer, const float x, const float y, const float width, const float height) {
+/* ------------ GPU Profiler State ------------ */
+static TTF_Font *prof_font = nullptr;
+static TTF_TextEngine *prof_text_engine = nullptr;
+static TTF_Text *title_text = nullptr;
+static TTF_Text *prof_category_texts[PROFILER_CATEGORY_COUNT] = {nullptr};
 
-    for (int sample_idx = 0; sample_idx < prof_samples.count; sample_idx++) {
-        int index = (prof_samples.newest - sample_idx);
-        index = index < 0 ? index + GRAPH_COUNT : index % GRAPH_COUNT; //handle negative index wrap-around (what a proper modulo would do)
-        const double total_time = prof_samples.total_times[index];
+void PROF_initUI(TTF_TextEngine *engine, TTF_Font *font) {
+    prof_text_engine = engine;
+    prof_font = font;
 
-        float current_y = y;
-        const float end_start_x = x + width * GRAPH_COUNT;
-        const float calculated_x = end_start_x - width * (float)(sample_idx+1);
-        //drawing each section of the bar
-        for (ProfilerSampleCategory section_idx = 0; section_idx < PROFILER_FRAME_TOTAL; section_idx++) {
-            const float section_height = (float)(prof_samples.samples[index][section_idx].duration_ms / total_time) * height;
-
-            //unique color for each section
-            const SDL_Color color = color_for_section(section_idx);
-            SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
-
-            SDL_FRect section_rect = {calculated_x, current_y, width, section_height};
-            SDL_RenderFillRect(renderer, &section_rect);
-
-            current_y += section_height; //move to the next section
-        }
-
-        //total time graph
-        const float scaled_height = (float)height / (goal_frame_time * 2.0f);
-
-        SDL_SetRenderDrawColor(renderer, 255, 150, 50, 255);
-        SDL_RenderFillRect(renderer, &(SDL_FRect){calculated_x, y+height, width, prof_samples.total_times[index] * scaled_height});
-        SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
+    // Pre-create TTF_Text objects for each category
+    title_text = TTF_CreateText(engine, font, "Debug Info", 0);
+    for (int i = 0; i < PROFILER_CATEGORY_COUNT; i++) {
+        prof_category_texts[i] = TTF_CreateText(engine, font, "", 0);
     }
-
-    //time graph borders + goal time line
-    SDL_RenderLine(renderer, x, y+height+height/2.0f, x+width*GRAPH_COUNT, y+height+height/2.0f);  //TODO: change to actual goal time height line!!
-    SDL_RenderRect(renderer, &(SDL_FRect){x, y+height, width*GRAPH_COUNT, height});
-
-    //profiler graph borders
-    SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
-    SDL_RenderRect(renderer, &(SDL_FRect){x, y, width*GRAPH_COUNT, height});
 }
 
-void PROF_render(SDL_Renderer *const SDL_RESTRICT renderer, TTF_Font *const SDL_RESTRICT font, SDL_FPoint position) {
-    char profiler_text[64];
+void PROF_deinitUI(void) {
+    TTF_DestroyText(title_text);
+    for (int i = 0; i < PROFILER_CATEGORY_COUNT; i++) {
+        if (prof_category_texts[i]) {
+            TTF_DestroyText(prof_category_texts[i]);
+            prof_category_texts[i] = nullptr;
+        }
+    }
+    prof_text_engine = nullptr;
+    prof_font = nullptr;
+}
+
+void PROF_render(const SDL_FPoint position) {
+    if (!prof_text_engine || !prof_font) return;
+
     const int index = prof_samples.newest;
-    //calculate total frame time
+    char text_buffer[64];
+
+    // --- Render category labels and color squares ---
+    constexpr float line_height = 24.0f; // Approximate text height
+    constexpr float square_size = line_height - 4.0f;
+    const float text_x = position.x + (square_size * 1.5f);
+    float current_y = position.y;
+
+    UI_TextWithBackground(title_text, position.x, current_y);
+    current_y += line_height + 16.0f;
 
     for (ProfilerSampleCategory category = 0; category < PROFILER_CATEGORY_COUNT; category++) {
+        // Update text content
         if (category == PROFILER_FRAME_TOTAL) {
-            snprintf(profiler_text, sizeof(profiler_text), " %s: %.2f | %.2f (ms)",
-                     PROF_category_names[category], prof_samples.samples[index][category].duration_ms, goal_frame_time);
+            snprintf(text_buffer, sizeof(text_buffer), "%s: %6.2f | %6.2f (ms)",
+                     PROF_category_names[category],
+                     prof_samples.samples[index][category].duration_ms,
+                     goal_frame_time);
         } else {
-            snprintf(profiler_text, sizeof(profiler_text), " %s: %2.2f ms",
-                     PROF_category_names[category], prof_samples.samples[index][category].duration_ms);
+            snprintf(text_buffer, sizeof(text_buffer), "%s: %6.2f ms",
+                     PROF_category_names[category],
+                     prof_samples.samples[index][category].duration_ms);
         }
-        SDL_Surface *const prof_surface = TTF_RenderText_LCD(font, profiler_text, strlen(profiler_text), (SDL_Color){255, 255, 255, 255}, (SDL_Color){0, 0, 0, 125});
-        if (prof_surface) {
-            SDL_Texture *const prof_texture = SDL_CreateTextureFromSurface(renderer, prof_surface);
-            if (likely(prof_texture)) {
-                const SDL_FRect text_rect_ = {position.x+(float)prof_surface->h, position.y, (float)prof_surface->w, (float)prof_surface->h};
-                SDL_RenderTexture(renderer, prof_texture, nullptr, &text_rect_);
-                SDL_DestroyTexture(prof_texture);
+        TTF_SetTextString(prof_category_texts[category], text_buffer, 0);
 
-                if (category != PROFILER_FRAME_TOTAL) {
-                    const SDL_Color color = color_for_section(category);
-                    SDL_SetRenderDrawColor(renderer, color.r, color.g, color.b, 255);
-                    SDL_RenderFillRect(renderer, &(SDL_FRect){text_rect_.x-text_rect_.h, text_rect_.y, text_rect_.h, text_rect_.h});
-                }
-            }
-            position.y += (float)prof_surface->h + 5.0f; //move down for the next line
-            SDL_DestroySurface(prof_surface);
+        // Queue text to be drawn
+        UI_TextWithBackground(prof_category_texts[category], text_x, current_y - 4.0f);
+
+        // Draw color square (except for FRAME_TOTAL)
+        if (category != PROFILER_FRAME_TOTAL) {
+            const SDL_FColor color = fcolor_for_section(category);
+            UI_FillRect(position.x, current_y + 2.0f, square_size, square_size, color);
         }
+
+        current_y += line_height + 8.0f;
     }
-    // swap_sample_buffers();
-    render_profiler_bar(renderer, position.x, position.y, 20.0f, 400.0f);
+
+    // --- Bar chart parameters ---
+    const float bar_x = position.x;
+    const float bar_y = current_y + 10.0f;
+    constexpr float bar_width = 12.0f;
+    constexpr float bar_height = 200.0f;
+    constexpr float time_graph_height = bar_height;
+    const SDL_FColor outline_color = {0.0f, 0.0f, 0.0f, 1.0f};
+    const SDL_FColor goal_line_color = {1.0f, 1.0f, 1.0f, 0.8f};
+    const SDL_FColor time_bar_color = {1.0f, 0.6f, 0.2f, 1.0f};
+
+    UI_FillRect(bar_x, bar_y, bar_width * GRAPH_COUNT, bar_height, outline_color);
+
+    UI_FillRect(bar_x, bar_y + bar_height,
+                bar_width * GRAPH_COUNT, time_graph_height,
+                UI_COLOR_BACKGROUND_DEFAULT);
+
+    // --- Render stacked bar chart ---
+    for (int sample_idx = 0; sample_idx < prof_samples.count; sample_idx++) {
+        int buf_index = (prof_samples.newest - sample_idx);
+        buf_index = buf_index < 0 ? buf_index + GRAPH_COUNT : buf_index % GRAPH_COUNT;
+        const double total_time = prof_samples.total_times[buf_index];
+        if (total_time <= 0.0) continue;
+
+        float section_y = bar_y;
+        const float calculated_x = bar_x + bar_width * GRAPH_COUNT - bar_width * (float)(sample_idx + 1);
+
+        // Draw each section of the stacked bar
+        for (ProfilerSampleCategory section = 0; section < PROFILER_FRAME_TOTAL; section++) {
+            const float section_height = (float)(prof_samples.samples[buf_index][section].duration_ms / total_time) * bar_height;
+            const SDL_FColor color = fcolor_for_section(section);
+
+            UI_FillRect(calculated_x, section_y, bar_width - 1.0f, section_height, color);
+            section_y += section_height;
+        }
+
+        // Draw time graph bar below
+        constexpr float scaled_height = time_graph_height / (goal_frame_time * 2.0f);
+        const float time_bar_h = prof_samples.total_times[buf_index] * scaled_height;
+        UI_FillRect(calculated_x, bar_y + bar_height, bar_width - 1.0f, time_bar_h, time_bar_color);
+    }
+
+    // --- Draw outlines and goal line ---
+    // Bar chart outline
+    UI_RectOutline(bar_x, bar_y, bar_width * GRAPH_COUNT, bar_height, outline_color, 1.0f);
+
+    // Time graph outline
+    UI_RectOutline(bar_x, bar_y + bar_height,
+                bar_width * GRAPH_COUNT, time_graph_height,
+                    outline_color, 1.0f);
+
+    // Goal time line (horizontal line at 50% of time graph = goal frame time)
+    UI_Line(bar_x, bar_y + bar_height + time_graph_height * 0.5f,
+            bar_x + bar_width * GRAPH_COUNT, bar_y + bar_height + time_graph_height * 0.5f,
+            goal_line_color, 1.0f);
+
 }

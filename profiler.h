@@ -5,9 +5,7 @@
 #ifndef PROFILER_H
 #define PROFILER_H
 
-#include <assert.h>
 #include "SDL3/SDL_stdinc.h"
-#include "SDL3/SDL_render.h"
 #include "SDL3_ttf/SDL_ttf.h"
 
 typedef enum ProfilerSampleCategory {
@@ -30,6 +28,8 @@ typedef struct ProfilerSample {
     float duration_ms;
 } ProfilerSample;
 
+#define unlikely(x)       __builtin_expect(!!(x), 0)
+#define likely(x)         __builtin_expect(!!(x), 1)
 /**
  * Must be called ONCE per frame loop, BEFORE any/all PROF_start() calls, ideally at the beginning of the frame loop, or right after the PROF_frameEnd() call.
  * It starts counting the total frame time for the frame sample.
@@ -94,6 +94,25 @@ float PROF_getFrameWaitTime();
 void PROF_getFPS(float *SDL_RESTRICT min, float *SDL_RESTRICT avg, float *SDL_RESTRICT max);
 
 /* ------------ rendering the profiler ------------ */
-void PROF_render(SDL_Renderer *restrict renderer, TTF_Font *restrict font, SDL_FPoint position);
+/**
+ * Initialize the GPU profiler rendering resources.
+ * Must be called once after the renderer is initialized.
+ * @param engine The TTF text engine from Renderer_GetTextEngine()
+ * @param font The font to use for profiler text
+ */
+void PROF_initUI(TTF_TextEngine *engine, TTF_Font *font);
+
+/**
+ * Shutdown and free GPU profiler rendering resources.
+ * Should be called before renderer shutdown.
+ */
+void PROF_deinitUI(void);
+
+/**
+ * Render the profiler using the GPU renderer.
+ * Must be called between Renderer_BeginFrame() and Renderer_EndFrame().
+ * @param position Top-left position for the profiler display
+ */
+void PROF_render(SDL_FPoint position);
 
 #endif //PROFILER_H
