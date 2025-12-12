@@ -873,24 +873,23 @@ int mainLoop(void) {
                             break;
                         }
                         case SDLK_W: {
-                            Camera2D_Component *main_camera_component = ss_get(&ecs.cameras, main_camera);
-                            const float normalized_zoom = (main_camera_component->camera.zoom * -1.0f) + 4.5f;
-                            main_camera_component->camera.position.y -= normalized_zoom * dt * 6000.0f;
+                            Camera2D_Component *cam = ss_get(&ecs.cameras, main_camera);
+                            CAMERA_pan(&cam->camera, 0, -1, dt);
                             break;
                         }
                         case SDLK_S: {
-                            Camera2D_Component *main_camera_component = ss_get(&ecs.cameras, main_camera);
-                            main_camera_component->camera.position.y += main_camera_component->camera.zoom * dt * 6000.0f;
+                            Camera2D_Component *cam = ss_get(&ecs.cameras, main_camera);
+                            CAMERA_pan(&cam->camera, 0, 1, dt);
                             break;
                         }
                         case SDLK_A: {
-                            Camera2D_Component *main_camera_component = ss_get(&ecs.cameras, main_camera);
-                            main_camera_component->camera.position.x -= main_camera_component->camera.zoom * dt * 6000.0f;
+                            Camera2D_Component *cam = ss_get(&ecs.cameras, main_camera);
+                            CAMERA_pan(&cam->camera, -1, 0, dt);
                             break;
                         }
                         case SDLK_D: {
-                            Camera2D_Component *main_camera_component = ss_get(&ecs.cameras, main_camera);
-                            main_camera_component->camera.position.x += main_camera_component->camera.zoom * dt * 6000.0f;
+                            Camera2D_Component *cam = ss_get(&ecs.cameras, main_camera);
+                            CAMERA_pan(&cam->camera, 1, 0, dt);
                             break;
                         }
                         case SDLK_V: {
