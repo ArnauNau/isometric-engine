@@ -3,6 +3,7 @@
 #include <SDL3_ttf/SDL_ttf.h>
 
 #include "camera/camera.h"
+#include "game_clock.h"
 #include "profiler.h"
 #include "renderer/renderer.h"
 #include "renderer/ui.h"
@@ -213,7 +214,7 @@ SDL_Point hover_tile = {-1, -1};
 
 
 //TODO: idea, weather conditions like in P3, can affect this! also refine wave math formula so it's more like a real sea wave
-static float sea_time = 0.0f;
+static GameClock game_clock;
 #define WAVE_SPEED 0.2f //how fast does the wave cycle go
 #define WAVE_AMPLITUDE 0.5f //how high are the waves (amplitude) in terms of tile height
 #define WAVE_PHASE 0.1f //how 'wide' are the waves (period) //TODO: in terms of tile width, not done yet.
@@ -252,7 +253,8 @@ void render_map(const Map *const map, const float offset_x, const float offset_y
                 const float adjusted_amplitude = (iso_h / 2.0f) * WAVE_AMPLITUDE;
                 const float wave_offset_compensation =
                         ((iso_h / 2.0f) * WAVE_AMPLITUDE) + (iso_h / 2.0f);
-                tile_y_offset = SDL_sinf(sea_time + phase) * adjusted_amplitude -
+                const float wave_time = game_clock.total * SDL_PI_F * 2.0f * WAVE_SPEED;
+                tile_y_offset = SDL_sinf(wave_time + phase) * adjusted_amplitude -
                                 wave_offset_compensation;
             }
             const float iso_y =
@@ -836,8 +838,11 @@ int mainLoop(void) {
     float mouse_x = 0.0f, mouse_y = 0.0f;
     SDL_Point mouse_tile = {0, 0};
 
+    game_clock = GameClock_create();
+
     while (running) {
-        const float dt = PROF_getLastFrameTime() / 1000.0f;
+        const float real_dt = PROF_getLastFrameTime() / 1000.0f;
+        GameClock_update(&game_clock, real_dt);
         PROF_frameStart();
 
         // --- Event Handling ---
@@ -872,22 +877,22 @@ int mainLoop(void) {
                         }
                         case SDLK_W: {
                             Camera2D_Component *cam = ss_get(&ecs.cameras, main_camera);
-                            CAMERA_pan(&cam->camera, 0, -1, dt);
+                            CAMERA_pan(&cam->camera, 0, -1, real_dt);
                             break;
                         }
                         case SDLK_S: {
                             Camera2D_Component *cam = ss_get(&ecs.cameras, main_camera);
-                            CAMERA_pan(&cam->camera, 0, 1, dt);
+                            CAMERA_pan(&cam->camera, 0, 1, real_dt);
                             break;
                         }
                         case SDLK_A: {
                             Camera2D_Component *cam = ss_get(&ecs.cameras, main_camera);
-                            CAMERA_pan(&cam->camera, -1, 0, dt);
+                            CAMERA_pan(&cam->camera, -1, 0, real_dt);
                             break;
                         }
                         case SDLK_D: {
                             Camera2D_Component *cam = ss_get(&ecs.cameras, main_camera);
-                            CAMERA_pan(&cam->camera, 1, 0, dt);
+                            CAMERA_pan(&cam->camera, 1, 0, real_dt);
                             break;
                         }
                         case SDLK_V: {
@@ -950,7 +955,7 @@ int mainLoop(void) {
         }
 
         // --- Systems ---
-        CAMERA_smooth_zoom_system(&ecs, PROF_getLastFrameTime(),
+        CAMERA_smooth_zoom_system(&ecs, real_dt,
                                   (SDL_FPoint){mouse_x, mouse_y});
         PROF_stop(PROFILER_EVENT_HANDLING);
 
@@ -1033,7 +1038,7 @@ int mainLoop(void) {
             PROF_getFPS(&min, &avg, &max);
             snprintf(fps_str, sizeof(fps_str), "FPS: min %4.0f  |  avg %4.0f  |  max %4.0f ", min, avg, max);
         } else {
-            snprintf(fps_str, sizeof(fps_str), "FPS %4.0f ", 1.0f / dt);
+            snprintf(fps_str, sizeof(fps_str), "FPS %4.0f ", 1.0f / real_dt);
         }
         TTF_SetTextString(fps_text, fps_str, 0);
         UI_TextWithBackground(fps_text, 10, ui_y_pos);
@@ -1063,7 +1068,6 @@ int mainLoop(void) {
         //     SDL_Delay(wait_time - 1);
         // SDL_Delay(1);
 
-        sea_time += dt * SDL_PI_F * 2.0f * WAVE_SPEED;
         PROF_stop(PROFILER_WAIT_FRAME);
         PROF_frameEnd();
     }
