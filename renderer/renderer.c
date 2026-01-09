@@ -1,4 +1,5 @@
 #include "renderer.h"
+#include "renderer_internal.h"
 #include <SDL3_image/SDL_image.h>
 #include <SDL3/SDL_log.h>
 
@@ -1383,6 +1384,40 @@ void Renderer_FlushUIText(const float *vertices, const int vertex_count,
 
     // Restore render pass with depth for any subsequent drawing
     color_target.load_op = SDL_GPU_LOADOP_LOAD;
+    const SDL_GPUDepthStencilTargetInfo depth_target = {
+        .texture = depth_texture,
+        .load_op = SDL_GPU_LOADOP_LOAD,
+        .store_op = SDL_GPU_STOREOP_STORE,
+        .stencil_load_op = SDL_GPU_LOADOP_DONT_CARE,
+        .stencil_store_op = SDL_GPU_STOREOP_DONT_CARE
+    };
+    render_pass = SDL_BeginGPURenderPass(cmd_buffer, &color_target, 1, &depth_target);
+}
+
+// ============================================================================
+// Internal Accessors (for renderer subsystems like debug_ui)
+// ============================================================================
+
+SDL_Window *Renderer_GetWindow(void) { return render_window; }
+SDL_GPUDevice *Renderer_GetDevice(void) { return gpu_device; }
+SDL_GPUCommandBuffer *Renderer_GetCommandBuffer(void) { return cmd_buffer; }
+SDL_GPUTexture *Renderer_GetSwapchainTexture(void) { return swapchain_texture; }
+
+void Renderer_EndRenderPass(void) {
+    if (render_pass) {
+        SDL_EndGPURenderPass(render_pass);
+        render_pass = nullptr;
+    }
+}
+
+void Renderer_ResumeRenderPass(void) {
+    if (render_pass || !swapchain_texture || !cmd_buffer) return;
+
+    const SDL_GPUColorTargetInfo color_target = {
+        .texture = swapchain_texture,
+        .load_op = SDL_GPU_LOADOP_LOAD,
+        .store_op = SDL_GPU_STOREOP_STORE
+    };
     const SDL_GPUDepthStencilTargetInfo depth_target = {
         .texture = depth_texture,
         .load_op = SDL_GPU_LOADOP_LOAD,
