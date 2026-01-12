@@ -16,7 +16,7 @@ typedef enum ProfilerSampleCategory {
     PROFILER_RENDER_UI,
     PROFILER_GPU,
     PROFILER_WAIT_FRAME,
-    PROFILER_GL,
+    PROFILER_NUKLEAR,
     // PROFILER_OTHER,
     PROFILER_FRAME_TOTAL,
     PROFILER_CATEGORY_COUNT //enum counter

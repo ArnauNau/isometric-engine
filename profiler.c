@@ -7,6 +7,8 @@
 #include "SDL3/SDL_timer.h"
 #include "renderer/ui.h"
 
+#include "SDL3/SDL_assert.h"
+
 #include <assert.h>
 
 static const char *const PROF_category_names[] = {
@@ -17,12 +19,12 @@ static const char *const PROF_category_names[] = {
     [PROFILER_RENDER_UI] = "render_UI",
     [PROFILER_GPU] = "gpu_commands",
     [PROFILER_WAIT_FRAME] = "wait_frame",
-    [PROFILER_GL] = "openGL",
+    [PROFILER_NUKLEAR] = "nuklear",
     // [PROFILER_OTHER] = "other",
     [PROFILER_FRAME_TOTAL] = "frame_total"
 };
 //check amount of profiler_type_names == ProfilerSampleTypes amount (- count)
-static_assert(sizeof(PROF_category_names) / sizeof(PROF_category_names[0]) == PROFILER_CATEGORY_COUNT, __ASSERT_FILE_NAME ": All profiler categories must have a declared name." );
+static_assert(sizeof(PROF_category_names) / sizeof(PROF_category_names[0]) == PROFILER_CATEGORY_COUNT, SDL_FILE ": All profiler categories must have a declared name." );
 
 
 #define MAX_FRAMES 60

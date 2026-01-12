@@ -2,7 +2,19 @@
 #include <SDL3_image/SDL_image.h>
 #include <SDL3_ttf/SDL_ttf.h>
 
+// Nuklear (declarations only, implementation in debug_ui.c)
+#define NK_INCLUDE_FIXED_TYPES
+#define NK_INCLUDE_STANDARD_IO
+#define NK_INCLUDE_STANDARD_VARARGS
+#define NK_INCLUDE_DEFAULT_ALLOCATOR
+#define NK_INCLUDE_VERTEX_BUFFER_OUTPUT
+#define NK_INCLUDE_FONT_BAKING
+#define NK_INCLUDE_DEFAULT_FONT
+#define NK_INCLUDE_COMMAND_USERDATA
+#include "vendored/nuklear/nuklear.h"
+
 #include "camera/camera.h"
+#include "debug_ui.h"
 #include "game_clock.h"
 #include "profiler.h"
 #include "renderer/renderer.h"
@@ -215,9 +227,9 @@ SDL_Point hover_tile = {-1, -1};
 
 //TODO: idea, weather conditions like in P3, can affect this! also refine wave math formula so it's more like a real sea wave
 static GameClock game_clock;
-#define WAVE_SPEED 0.2f //how fast does the wave cycle go
-#define WAVE_AMPLITUDE 0.5f //how high are the waves (amplitude) in terms of tile height
-#define WAVE_PHASE 0.1f //how 'wide' are the waves (period) //TODO: in terms of tile width, not done yet.
+static float wave_speed = 0.2f;     // how fast does the wave cycle go
+static float wave_amplitude = 0.5f; // how high are the waves (amplitude) in terms of tile height
+static float wave_phase = 0.1f;     // how 'wide' are the waves (period)
 
 void render_map(const Map *const map, const float offset_x, const float offset_y) {
     PROF_start(PROFILER_RENDER_MAP);
@@ -249,11 +261,11 @@ void render_map(const Map *const map, const float offset_x, const float offset_y
             float tile_y_offset = 0.0f;
 
             if (tile_index == TILE_PLACEHOLDER_SEA) {
-                const float phase = (float) (x + y) * WAVE_PHASE;
-                const float adjusted_amplitude = (iso_h / 2.0f) * WAVE_AMPLITUDE;
+                const float phase = (float) (x + y) * wave_phase;
+                const float adjusted_amplitude = (iso_h / 2.0f) * wave_amplitude;
                 const float wave_offset_compensation =
-                        ((iso_h / 2.0f) * WAVE_AMPLITUDE) + (iso_h / 2.0f);
-                const float wave_time = game_clock.total * SDL_PI_F * 2.0f * WAVE_SPEED;
+                        ((iso_h / 2.0f) * wave_amplitude) + (iso_h / 2.0f);
+                const float wave_time = game_clock.total * SDL_PI_F * 2.0f * wave_speed;
                 tile_y_offset = SDL_sinf(wave_time + phase) * adjusted_amplitude -
                                 wave_offset_compensation;
             }
@@ -673,6 +685,11 @@ int initialize(void) {
 
     UI_Init();
 
+    // Initialize Nuklear debug UI with same font
+    if (!DebugUI_Init("/Users/arnau/Library/Fonts/JetBrainsMono-Regular.ttf", 14.0f)) {
+        SDL_Log("Warning: Failed to initialize debug UI");
+    }
+
     const Tileset *const ts = load_tileset("isometric-sheet.png", TILE_SIZE, TILE_SIZE);
     if (ts == nullptr) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load tileset");
@@ -722,6 +739,7 @@ void clean(void) {
     if (fps_text)
         TTF_DestroyText(fps_text);
 
+    DebugUI_Shutdown();
     PROF_deinitUI();
     UI_Shutdown();
     Renderer_Shutdown();
@@ -847,8 +865,19 @@ int mainLoop(void) {
 
         // --- Event Handling ---
         PROF_start(PROFILER_EVENT_HANDLING);
+        DebugUI_BeginInput();
         SDL_Event event;
         while (SDL_PollEvent(&event)) {
+            // Let debug UI handle event first
+            PROF_stop(PROFILER_EVENT_HANDLING);
+            PROF_start(PROFILER_NUKLEAR);
+            if (DebugUI_HandleEvent(&event)) {
+                PROF_stop(PROFILER_NUKLEAR);
+                continue;
+            }
+            PROF_stop(PROFILER_NUKLEAR);
+            PROF_start(PROFILER_EVENT_HANDLING);
+
             switch (event.type) {
                 case SDL_EVENT_QUIT:
                     running = 0;
@@ -954,6 +983,8 @@ int mainLoop(void) {
             }
         }
 
+        DebugUI_EndInput();
+
         // --- Systems ---
         CAMERA_smooth_zoom_system(&ecs, real_dt,
                                   (SDL_FPoint){mouse_x, mouse_y});
@@ -1056,6 +1087,43 @@ int mainLoop(void) {
         UI_Flush();
 
         PROF_stop(PROFILER_RENDER_UI);
+
+        // --- Debug UI (Nuklear) ---
+        PROF_start(PROFILER_NUKLEAR);
+        struct nk_context *nk = DebugUI_GetContext();
+        const float ui_s = DebugUI_GetScale();
+        if (nk && nk_begin(nk, "Debug", nk_rect(50*ui_s, 400*ui_s, 280*ui_s, 400*ui_s),
+                          NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE |
+                          NK_WINDOW_MINIMIZABLE | NK_WINDOW_TITLE)) {
+            nk_layout_row_dynamic(nk, 25*ui_s, 1);
+            nk_labelf(nk, NK_TEXT_LEFT, "Buildings: %d", building_count);
+            nk_labelf(nk, NK_TEXT_LEFT, "Hover: (%d, %d)", hover_tile.x, hover_tile.y);
+            nk_layout_row_dynamic(nk, 30*ui_s, 2);
+            if (nk_button_label(nk, "Spawn 50")) {
+                spawn_boats(50, &building_count, map.tiles, map.occupied, map.width, map.height);
+            }
+            if (nk_button_label(nk, "Toggle Wire")) {
+                wireframe_mode = !wireframe_mode;
+            }
+            nk_layout_row_dynamic(nk, 25*ui_s, 1);
+            nk_bool dbg = debug_mode;
+            nk_checkbox_label(nk, "Debug Mode", &dbg);
+            debug_mode = dbg;
+
+            // Sea wave controls
+            nk_layout_row_dynamic(nk, 20*ui_s, 1);
+            nk_label(nk, "--- Sea Waves ---", NK_TEXT_CENTERED);
+            nk_layout_row_dynamic(nk, 20*ui_s, 1);
+            nk_labelf(nk, NK_TEXT_LEFT, "Speed: %.2f", wave_speed);
+            nk_slider_float(nk, 0.0f, &wave_speed, 2.0f, 0.01f);
+            nk_labelf(nk, NK_TEXT_LEFT, "Amplitude: %.2f", wave_amplitude);
+            nk_slider_float(nk, 0.0f, &wave_amplitude, 2.0f, 0.01f);
+            nk_labelf(nk, NK_TEXT_LEFT, "Phase: %.3f", wave_phase);
+            nk_slider_float(nk, 0.0f, &wave_phase, 1.0f, 0.005f);
+        }
+        nk_end(nk);
+        DebugUI_Render();
+        PROF_stop(PROFILER_NUKLEAR);
 
         PROF_start(PROFILER_GPU);
         Renderer_EndFrame();
