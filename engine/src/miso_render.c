@@ -1,8 +1,7 @@
 #include "miso_render.h"
 
 #include "internal/miso__engine_internal.h"
-#include "renderer/renderer.h"
-#include "renderer/ui.h"
+#include "internal/miso__renderer_backend.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
@@ -17,7 +16,7 @@ typedef struct MisoFontEntry {
 
 static SDL_GPUTexture *g_texture_table[MISO_TEXTURE_TABLE_MAX] = {0};
 static MisoFontEntry g_font_table[MISO_FONT_TABLE_MAX] = {0};
-static SDL_Vertex *g_world_geometry_scratch = NULL;
+static SDL_Vertex *g_world_geometry_scratch = nullptr;
 static int g_world_geometry_scratch_capacity = 0;
 
 static SDL_FColor miso__color_from_rgba8(const uint32_t rgba8) {
@@ -58,7 +57,7 @@ MisoResult miso_render_load_texture(const MisoEngine *engine, const char *path, 
         return MISO_ERR_INVALID_ARG;
     }
 
-    SDL_GPUTexture *texture = Renderer_LoadTexture(path);
+    SDL_GPUTexture *texture = miso__renderer_load_texture(path);
     if (!texture) {
         return MISO_ERR_IO;
     }
@@ -71,7 +70,7 @@ MisoResult miso_render_load_texture(const MisoEngine *engine, const char *path, 
         }
     }
 
-    Renderer_DestroyTexture(texture);
+    miso__renderer_destroy_texture(texture);
     return MISO_ERR_OUT_OF_MEMORY;
 }
 
@@ -82,8 +81,8 @@ void miso_render_destroy_texture(const MisoEngine *engine, const MisoTextureHand
         return;
     }
 
-    Renderer_DestroyTexture(g_texture_table[texture]);
-    g_texture_table[texture] = NULL;
+    miso__renderer_destroy_texture(g_texture_table[texture]);
+    g_texture_table[texture] = nullptr;
 }
 
 MisoResult
@@ -94,7 +93,7 @@ miso_render_load_font(const MisoEngine *engine, const char *path, float point_si
         return MISO_ERR_INVALID_ARG;
     }
 
-    TTF_TextEngine *text_engine = Renderer_GetTextEngine();
+    TTF_TextEngine *text_engine = miso__renderer_get_text_engine();
     if (!text_engine) {
         return MISO_ERR_GPU;
     }
@@ -136,8 +135,8 @@ void miso_render_destroy_font(const MisoEngine *engine, const MisoFontHandle fon
     }
     TTF_CloseFont(g_font_table[font].font);
 
-    g_font_table[font].text = NULL;
-    g_font_table[font].font = NULL;
+    g_font_table[font].text = nullptr;
+    g_font_table[font].font = nullptr;
 }
 
 bool miso_render_get_frame_stats(const MisoEngine *engine, MisoRenderFrameStats *out_stats) {
@@ -147,31 +146,13 @@ bool miso_render_get_frame_stats(const MisoEngine *engine, MisoRenderFrameStats 
         return false;
     }
 
-    const RendererFrameStats *src = Renderer_GetFrameStats();
-    if (!src) {
+    MisoRendererFrameStatsSnapshot snapshot;
+    if (!miso__renderer_copy_frame_stats(&snapshot)) {
         SDL_memset(out_stats, 0, sizeof(*out_stats));
         return false;
     }
 
-    for (int i = 0; i < MISO_RENDER_STATS_QUEUE_COUNT && i < RENDERER_STATS_QUEUE_COUNT; i++) {
-        out_stats->queues[i].cmd_count = src->queues[i].cmd_count;
-        out_stats->queues[i].draw_calls = src->queues[i].draw_calls;
-    }
-
-    out_stats->passes.begin_calls = src->passes.begin_calls;
-    out_stats->passes.end_calls = src->passes.end_calls;
-    out_stats->passes.world_passes = src->passes.world_passes;
-    out_stats->passes.ui_passes = src->passes.ui_passes;
-
-    out_stats->timing.swapchain_acquire_ms = src->timing.swapchain_acquire_ms;
-    out_stats->timing.submit_ms = src->timing.submit_ms;
-
-    for (int i = 0; i < MISO_RENDER_STATS_STREAM_COUNT && i < RENDERER_STATS_STREAM_COUNT; i++) {
-        out_stats->streams[i].used_bytes = src->streams[i].used_bytes;
-        out_stats->streams[i].peak_bytes = src->streams[i].peak_bytes;
-        out_stats->streams[i].capacity_bytes = src->streams[i].capacity_bytes;
-    }
-
+    SDL_memcpy(out_stats, &snapshot, sizeof(*out_stats));
     return true;
 }
 
@@ -182,13 +163,13 @@ void miso_render_begin_world(MisoEngine *engine, const MisoCameraId camera_id) {
 
     float view_projection[16] = {0};
     miso__camera_get_view_projection(engine, camera_id, view_projection);
-    Renderer_SetViewProjection(view_projection);
+    miso__renderer_set_view_projection(view_projection);
 }
 
 void miso_render_set_water_params(
     const MisoEngine *engine, const float time, const float speed, const float amplitude, const float phase) {
     (void)engine;
-    Renderer_SetWaterParams(time, speed, amplitude, phase);
+    miso__renderer_set_water_params(time, speed, amplitude, phase);
 }
 
 void miso_render_submit_sprites(const MisoEngine *engine,
@@ -201,7 +182,7 @@ void miso_render_submit_sprites(const MisoEngine *engine,
         return;
     }
 
-    Renderer_DrawSprites(g_texture_table[texture], (const SpriteInstance *)instances, count);
+    miso__renderer_draw_sprites(g_texture_table[texture], instances, count);
 }
 
 void miso_render_submit_world_geometry(const MisoEngine *engine, const MisoWorldVertex *vertices, int count) {
@@ -223,7 +204,7 @@ void miso_render_submit_world_geometry(const MisoEngine *engine, const MisoWorld
         };
     }
 
-    Renderer_DrawGeometry(g_world_geometry_scratch, count);
+    miso__renderer_draw_geometry(g_world_geometry_scratch, count);
 }
 
 void miso_render_end_world(const MisoEngine *engine) {
@@ -237,7 +218,7 @@ void miso_render_begin_ui(const MisoEngine *engine) {
 void miso_render_submit_ui_rect(
     const MisoEngine *engine, const float x, const float y, const float w, const float h, const uint32_t rgba8) {
     (void)engine;
-    UI_FillRect(x, y, w, h, miso__color_from_rgba8(rgba8));
+    miso__renderer_ui_fill_rect(x, y, w, h, miso__color_from_rgba8(rgba8));
 }
 
 void miso_render_submit_ui_text(const MisoEngine *engine,
@@ -257,18 +238,18 @@ void miso_render_submit_ui_text(const MisoEngine *engine,
     }
 
     TTF_SetTextString(g_font_table[font].text, text, 0);
-    UI_Text(g_font_table[font].text, x, y);
+    miso__renderer_ui_text(g_font_table[font].text, x, y);
 }
 
 void miso_render_end_ui(const MisoEngine *engine) {
     (void)engine;
-    UI_Flush();
+    miso__renderer_ui_flush();
 }
 
 void miso__render_shutdown(void) {
     for (uint32_t i = 1; i < MISO_TEXTURE_TABLE_MAX; i++) {
         if (g_texture_table[i]) {
-            Renderer_DestroyTexture(g_texture_table[i]);
+            miso__renderer_destroy_texture(g_texture_table[i]);
             g_texture_table[i] = NULL;
         }
     }

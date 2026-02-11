@@ -1,0 +1,103 @@
+#include "miso__renderer_backend.h"
+
+#include "renderer/renderer.h"
+#include "renderer/renderer_internal.h"
+#include "renderer/ui.h"
+
+_Static_assert(sizeof(MisoRendererFrameStatsSnapshot) == sizeof(RendererFrameStats),
+               "MisoRendererFrameStatsSnapshot must match RendererFrameStats layout");
+
+bool miso__renderer_init(SDL_Window *window) {
+    return Renderer_Init(window);
+}
+
+void miso__renderer_shutdown(void) {
+    Renderer_Shutdown();
+}
+
+void miso__renderer_resize(int width, int height) {
+    Renderer_Resize(width, height);
+}
+
+void miso__renderer_set_vsync(bool enabled) {
+    Renderer_SetVSync(enabled);
+}
+
+void miso__renderer_begin_frame(void) {
+    Renderer_BeginFrame();
+}
+
+void miso__renderer_end_frame(void) {
+    Renderer_EndFrame();
+}
+
+SDL_GPUTexture *miso__renderer_load_texture(const char *path) {
+    return Renderer_LoadTexture(path);
+}
+
+void miso__renderer_destroy_texture(SDL_GPUTexture *texture) {
+    Renderer_DestroyTexture(texture);
+}
+
+void miso__renderer_set_view_projection(const float *view_projection) {
+    Renderer_SetViewProjection(view_projection);
+}
+
+void miso__renderer_set_water_params(float time, float speed, float amplitude, float phase) {
+    Renderer_SetWaterParams(time, speed, amplitude, phase);
+}
+
+void miso__renderer_draw_sprites(SDL_GPUTexture *texture, const void *instances, int count) {
+    Renderer_DrawSprites(texture, (const SpriteInstance *)instances, count);
+}
+
+void miso__renderer_draw_geometry(const SDL_Vertex *vertices, int count) {
+    Renderer_DrawGeometry(vertices, count);
+}
+
+bool miso__renderer_copy_frame_stats(MisoRendererFrameStatsSnapshot *out_stats) {
+    if (!out_stats) {
+        return false;
+    }
+
+    const RendererFrameStats *stats = Renderer_GetFrameStats();
+    if (!stats) {
+        SDL_memset(out_stats, 0, sizeof(*out_stats));
+        return false;
+    }
+
+    SDL_memcpy(out_stats, stats, sizeof(*out_stats));
+    return true;
+}
+
+TTF_TextEngine *miso__renderer_get_text_engine(void) {
+    return Renderer_GetTextEngine();
+}
+
+void miso__renderer_ui_init(void) {
+    UI_Init();
+}
+
+void miso__renderer_ui_shutdown(void) {
+    UI_Shutdown();
+}
+
+void miso__renderer_ui_fill_rect(float x, float y, float w, float h, SDL_FColor color) {
+    UI_FillRect(x, y, w, h, color);
+}
+
+void miso__renderer_ui_text(TTF_Text *text, float x, float y) {
+    UI_Text(text, x, y);
+}
+
+void miso__renderer_ui_flush(void) {
+    UI_Flush();
+}
+
+SDL_Window *miso__renderer_get_window(void) {
+    return Renderer_GetWindow();
+}
+
+void miso__renderer_end_render_pass(void) {
+    Renderer_EndRenderPass();
+}

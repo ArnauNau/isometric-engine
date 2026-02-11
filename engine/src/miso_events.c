@@ -1,10 +1,10 @@
 #include "internal/miso__engine_internal.h"
+#include "internal/miso__renderer_backend.h"
 #include "miso_engine.h"
-#include "renderer/renderer.h"
 
 #include <SDL3/SDL.h>
 
-static MisoMouseButton miso__to_mouse_button(uint8_t button) {
+static MisoMouseButton miso__to_mouse_button(const uint8_t button) {
     switch (button) {
     case SDL_BUTTON_LEFT:
         return MISO_MOUSE_BUTTON_LEFT;
@@ -21,7 +21,7 @@ static MisoMouseButton miso__to_mouse_button(uint8_t button) {
     }
 }
 
-static uint32_t miso__to_key_modifiers(SDL_Keymod mod) {
+static uint32_t miso__to_key_modifiers(const SDL_Keymod mod) {
     uint32_t flags = MISO_KEYMOD_NONE;
     if (mod & SDL_KMOD_SHIFT) {
         flags |= MISO_KEYMOD_SHIFT;
@@ -67,7 +67,7 @@ bool miso_poll_event(MisoEngine *engine, MisoEvent *out_event) {
         out_event->type = MISO_EVENT_WINDOW_RESIZED;
         out_event->data.window_resized.width = event.window.data1;
         out_event->data.window_resized.height = event.window.data2;
-        Renderer_Resize(event.window.data1, event.window.data2);
+        miso__renderer_resize(event.window.data1, event.window.data2);
         break;
 
     case SDL_EVENT_MOUSE_MOTION:

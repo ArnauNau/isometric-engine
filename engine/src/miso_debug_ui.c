@@ -1,7 +1,7 @@
 #include "miso_debug_ui.h"
 
 #include "debug_ui.h"
-#include "renderer/renderer_internal.h"
+#include "internal/miso__renderer_backend.h"
 
 #define NK_INCLUDE_FIXED_TYPES
 #define NK_INCLUDE_STANDARD_IO
@@ -113,7 +113,7 @@ static void miso_debug_ui_feed_text(struct nk_context *ctx, const MisoTextInputE
 }
 
 static float miso_debug_ui_get_window_scale(void) {
-    SDL_Window *window = Renderer_GetWindow();
+    SDL_Window *window = miso__renderer_get_window();
     if (!window) {
         const float fallback = DebugUI_GetScale();
         return fallback > 0.0f ? fallback : 1.0f;
@@ -159,8 +159,9 @@ bool miso_debug_ui_feed_event(const MisoEvent *event) {
 
     switch (event->type) {
     case MISO_EVENT_MOUSE_MOVE:
-        nk_input_motion(
-            ctx, (int)SDL_lroundf((float)event->data.mouse_move.x * scale), (int)SDL_lroundf((float)event->data.mouse_move.y * scale));
+        nk_input_motion(ctx,
+                        (int)SDL_lroundf((float)event->data.mouse_move.x * scale),
+                        (int)SDL_lroundf((float)event->data.mouse_move.y * scale));
         break;
     case MISO_EVENT_MOUSE_BUTTON: {
         enum nk_buttons button = NK_BUTTON_LEFT;
@@ -206,7 +207,7 @@ bool miso_debug_ui_feed_event(const MisoEvent *event) {
 
 void miso_debug_ui_prepare_render(const MisoEngine *engine) {
     (void)engine;
-    Renderer_EndRenderPass();
+    miso__renderer_end_render_pass();
 }
 
 struct nk_context *miso_debug_ui_get_context(void) {
