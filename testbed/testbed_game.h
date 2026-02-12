@@ -3,8 +3,6 @@
 
 #include "miso_engine.h"
 
-#include <stdbool.h>
-
 typedef struct TestbedGame TestbedGame;
 
 MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game);

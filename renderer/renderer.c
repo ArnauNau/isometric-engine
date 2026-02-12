@@ -39,7 +39,7 @@ static SDL_GPUPresentMode g_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
 #define RENDERER_MAX_UI_TEXT_RANGES 16U
 
 #define RENDERER_SPRITE_SLOT_BYTES (sizeof(SpriteInstance) * 100000U)
-#define RENDERER_WORLD_GEOM_SLOT_BYTES (sizeof(SDL_Vertex) * 300000U)
+#define RENDERER_WORLD_GEOM_SLOT_BYTES (sizeof(SDL_Vertex) * 65536U)
 #define RENDERER_LINE_SLOT_BYTES (sizeof(float) * 3U * 65536U)
 #define RENDERER_UI_GEOM_SLOT_BYTES (sizeof(SDL_Vertex) * 131072U)
 #define RENDERER_UI_TEXT_VERT_SLOT_BYTES (sizeof(float) * 4U * 262144U)
@@ -76,6 +76,7 @@ typedef struct {
 
 typedef struct {
     Uint32 vertex_offset;
+    Uint32 vertex_count;
     SDL_FColor color;
     float matrix[16];
 } LineCmd;
@@ -197,7 +198,8 @@ static SDL_GPUShader *LoadShader(SDL_GPUDevice *const device,
     return shader;
 }
 
-static bool renderer_stream_init(RendererUploadStream *const stream, const SDL_GPUBufferUsageFlags usage, const Uint32 slot_size) {
+static bool
+renderer_stream_init(RendererUploadStream *const stream, const SDL_GPUBufferUsageFlags usage, const Uint32 slot_size) {
     stream->slot_size = renderer_align_up(slot_size, RENDERER_STREAM_ALIGN);
     stream->total_size = stream->slot_size * RENDERER_FRAMES_IN_FLIGHT;
 
@@ -263,7 +265,10 @@ static void renderer_stream_end_frame(RendererUploadStream *const stream) {
     }
 }
 
-static bool renderer_stream_alloc(RendererUploadStream *const stream, const Uint32 size, const Uint32 alignment, Uint32 *const out_offset) {
+static bool renderer_stream_alloc(RendererUploadStream *const stream,
+                                  const Uint32 size,
+                                  const Uint32 alignment,
+                                  Uint32 *const out_offset) {
     if (!stream || !out_offset || size == 0) {
         return false;
     }
@@ -285,8 +290,11 @@ static bool renderer_stream_alloc(RendererUploadStream *const stream, const Uint
     return true;
 }
 
-static bool renderer_stream_write(
-    RendererUploadStream *const restrict stream, const void *const restrict src, const Uint32 size, const Uint32 alignment, Uint32 *const restrict out_offset) {
+static bool renderer_stream_write(RendererUploadStream *const restrict stream,
+                                  const void *const restrict src,
+                                  const Uint32 size,
+                                  const Uint32 alignment,
+                                  Uint32 *const restrict out_offset) {
     if (!src || size == 0) {
         return false;
     }
@@ -324,7 +332,8 @@ static Uint32 renderer_stream_used_bytes(const RendererUploadStream *const strea
     return stream->write_offset - stream->slot_base;
 }
 
-static void renderer_record_stream_stat(const RendererStatsStreamKind stream_kind, const RendererUploadStream *const stream) {
+static void renderer_record_stream_stat(const RendererStatsStreamKind stream_kind,
+                                        const RendererUploadStream *const stream) {
     RendererStreamStats *const stream_stats = &g_frame_stats.streams[stream_kind];
     stream_stats->used_bytes = renderer_stream_used_bytes(stream);
     stream_stats->peak_bytes = stream->peak_used_bytes;
@@ -430,13 +439,16 @@ static void renderer_draw_world_pass(SDL_GPUCommandBuffer *const cmd) {
 
     for (Uint32 i = 0; i < line_cmd_count; i++) {
         const LineCmd *const cmdi = &line_cmds[i];
+        if (cmdi->vertex_count == 0U) {
+            continue;
+        }
 
         SDL_BindGPUGraphicsPipeline(pass, line_pipeline);
         SDL_BindGPUVertexBuffers(
             pass, 0, &((SDL_GPUBufferBinding){.buffer = line_stream.gpu, .offset = cmdi->vertex_offset}), 1);
         SDL_PushGPUVertexUniformData(cmd, 0, cmdi->matrix, sizeof(float) * 16U);
         SDL_PushGPUFragmentUniformData(cmd, 0, &cmdi->color, sizeof(cmdi->color));
-        SDL_DrawGPUPrimitives(pass, 2, 1, 0, 0);
+        SDL_DrawGPUPrimitives(pass, cmdi->vertex_count, 1, 0, 0);
 
         g_frame_stats.queues[RENDERER_STATS_QUEUE_LINE].draw_calls++;
     }
@@ -599,21 +611,21 @@ bool Renderer_Init(SDL_Window *const window) {
     };
 
     SDL_GPUShader *const sprite_vs = LoadShader(gpu_device,
-                                          getResourcePath(shader_path, "shaders/sprite.metal"),
-                                          "vertex_main",
-                                          0,
-                                          1,
-                                          1,
-                                          0,
-                                          SDL_GPU_SHADERSTAGE_VERTEX);
+                                                getResourcePath(shader_path, "shaders/sprite.metal"),
+                                                "vertex_main",
+                                                0,
+                                                1,
+                                                1,
+                                                0,
+                                                SDL_GPU_SHADERSTAGE_VERTEX);
     SDL_GPUShader *const sprite_fs = LoadShader(gpu_device,
-                                          getResourcePath(shader_path, "shaders/sprite.metal"),
-                                          "fragment_main",
-                                          1,
-                                          0,
-                                          0,
-                                          0,
-                                          SDL_GPU_SHADERSTAGE_FRAGMENT);
+                                                getResourcePath(shader_path, "shaders/sprite.metal"),
+                                                "fragment_main",
+                                                1,
+                                                0,
+                                                0,
+                                                0,
+                                                SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!sprite_vs || !sprite_fs) {
         return false;
     }
@@ -647,21 +659,21 @@ bool Renderer_Init(SDL_Window *const window) {
     }
 
     SDL_GPUShader *const geo_vs = LoadShader(gpu_device,
-                                       getResourcePath(shader_path, "shaders/geometry.metal"),
-                                       "vertex_geometry",
-                                       0,
-                                       1,
-                                       0,
-                                       0,
-                                       SDL_GPU_SHADERSTAGE_VERTEX);
+                                             getResourcePath(shader_path, "shaders/geometry.metal"),
+                                             "vertex_geometry",
+                                             0,
+                                             1,
+                                             0,
+                                             0,
+                                             SDL_GPU_SHADERSTAGE_VERTEX);
     SDL_GPUShader *const geo_fs = LoadShader(gpu_device,
-                                       getResourcePath(shader_path, "shaders/geometry.metal"),
-                                       "fragment_geometry",
-                                       0,
-                                       0,
-                                       0,
-                                       0,
-                                       SDL_GPU_SHADERSTAGE_FRAGMENT);
+                                             getResourcePath(shader_path, "shaders/geometry.metal"),
+                                             "fragment_geometry",
+                                             0,
+                                             0,
+                                             0,
+                                             0,
+                                             SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!geo_vs || !geo_fs) {
         return false;
     }
@@ -719,21 +731,21 @@ bool Renderer_Init(SDL_Window *const window) {
     }
 
     SDL_GPUShader *const line_vs = LoadShader(gpu_device,
-                                        getResourcePath(shader_path, "shaders/ui.metal"),
-                                        "vertex_line",
-                                        0,
-                                        1,
-                                        0,
-                                        0,
-                                        SDL_GPU_SHADERSTAGE_VERTEX);
+                                              getResourcePath(shader_path, "shaders/ui.metal"),
+                                              "vertex_line",
+                                              0,
+                                              1,
+                                              0,
+                                              0,
+                                              SDL_GPU_SHADERSTAGE_VERTEX);
     SDL_GPUShader *const line_fs = LoadShader(gpu_device,
-                                        getResourcePath(shader_path, "shaders/ui.metal"),
-                                        "fragment_line",
-                                        0,
-                                        1,
-                                        0,
-                                        0,
-                                        SDL_GPU_SHADERSTAGE_FRAGMENT);
+                                              getResourcePath(shader_path, "shaders/ui.metal"),
+                                              "fragment_line",
+                                              0,
+                                              1,
+                                              0,
+                                              0,
+                                              SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!line_vs || !line_fs) {
         return false;
     }
@@ -783,21 +795,21 @@ bool Renderer_Init(SDL_Window *const window) {
     }
 
     SDL_GPUShader *const text_vs = LoadShader(gpu_device,
-                                        getResourcePath(shader_path, "shaders/ui.metal"),
-                                        "vertex_text",
-                                        0,
-                                        1,
-                                        0,
-                                        0,
-                                        SDL_GPU_SHADERSTAGE_VERTEX);
+                                              getResourcePath(shader_path, "shaders/ui.metal"),
+                                              "vertex_text",
+                                              0,
+                                              1,
+                                              0,
+                                              0,
+                                              SDL_GPU_SHADERSTAGE_VERTEX);
     SDL_GPUShader *const text_fs = LoadShader(gpu_device,
-                                        getResourcePath(shader_path, "shaders/ui.metal"),
-                                        "fragment_text",
-                                        1,
-                                        1,
-                                        0,
-                                        0,
-                                        SDL_GPU_SHADERSTAGE_FRAGMENT);
+                                              getResourcePath(shader_path, "shaders/ui.metal"),
+                                              "fragment_text",
+                                              1,
+                                              1,
+                                              0,
+                                              0,
+                                              SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!text_vs || !text_fs) {
         return false;
     }
@@ -1076,7 +1088,8 @@ void Renderer_BeginFrame(void) {
     }
 
     const Uint64 acquire_start = SDL_GetPerformanceCounter();
-    const bool got_swapchain = SDL_AcquireGPUSwapchainTexture(cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr);
+    const bool got_swapchain =
+        SDL_AcquireGPUSwapchainTexture(cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr);
     const Uint64 acquire_end = SDL_GetPerformanceCounter();
     g_frame_stats.timing.swapchain_acquire_ms = renderer_elapsed_ms(acquire_start, acquire_end);
 
@@ -1184,20 +1197,32 @@ void Renderer_DrawSprites(SDL_GPUTexture *const texture, const SpriteInstance *c
     g_frame_stats.queues[RENDERER_STATS_QUEUE_SPRITE].cmd_count = sprite_cmd_count;
 }
 
-void Renderer_DrawLine(const float x1, const float y1, const float z1, const float x2, const float y2, const float z2,
+void Renderer_DrawLine(const float x1,
+                       const float y1,
+                       const float z1,
+                       const float x2,
+                       const float y2,
+                       const float z2,
                        const SDL_FColor color) {
-    if (!cmd_buffer || !swapchain_texture || frame_queues_flushed || line_cmd_count >= RENDERER_MAX_LINE_CMDS) {
+    const float vertices[6] = {x1, y1, z1, x2, y2, z2};
+    Renderer_DrawLineBatch(vertices, 2, color);
+}
+
+void Renderer_DrawLineBatch(const float *const vertices_xyz, const int vertex_count, const SDL_FColor color) {
+    if (!vertices_xyz || vertex_count < 2 || (vertex_count & 1) != 0 || !cmd_buffer || !swapchain_texture ||
+        frame_queues_flushed || line_cmd_count >= RENDERER_MAX_LINE_CMDS) {
         return;
     }
 
-    const float vertices[6] = {x1, y1, z1, x2, y2, z2};
+    const Uint32 upload_size = (Uint32)(sizeof(float) * 3U * (Uint32)vertex_count);
     Uint32 byte_offset = 0;
-    if (!renderer_stream_write(&line_stream, vertices, sizeof(vertices), RENDERER_STREAM_ALIGN, &byte_offset)) {
+    if (!renderer_stream_write(&line_stream, vertices_xyz, upload_size, RENDERER_STREAM_ALIGN, &byte_offset)) {
         return;
     }
 
     LineCmd *cmd = &line_cmds[line_cmd_count++];
     cmd->vertex_offset = byte_offset;
+    cmd->vertex_count = (Uint32)vertex_count;
     cmd->color = color;
     SDL_memcpy(cmd->matrix, sprite_uniforms.viewProjection, sizeof(float) * 16U);
 
@@ -1367,13 +1392,29 @@ void Renderer_FlushUIText(const float *const restrict vertices,
     g_frame_stats.queues[RENDERER_STATS_QUEUE_UI_TEXT].cmd_count = ui_text_cmd_count;
 }
 
-void Renderer_DrawTextureDebug(SDL_GPUTexture *texture, const float x, const float y, const float width, const float height) {
+void Renderer_DrawTextureDebug(
+    SDL_GPUTexture *texture, const float x, const float y, const float width, const float height) {
     if (!texture || width <= 0.0f || height <= 0.0f) {
         return;
     }
 
     const float vertices[16] = {
-        x, y, 0.0f, 0.0f, x + width, y, 1.0f, 0.0f, x + width, y + height, 1.0f, 1.0f, x, y + height, 0.0f, 1.0f,
+        x,
+        y,
+        0.0f,
+        0.0f,
+        x + width,
+        y,
+        1.0f,
+        0.0f,
+        x + width,
+        y + height,
+        1.0f,
+        1.0f,
+        x,
+        y + height,
+        0.0f,
+        1.0f,
     };
     const int indices[6] = {0, 1, 2, 0, 2, 3};
     const UITextAtlasInfo atlas = {
@@ -1384,7 +1425,8 @@ void Renderer_DrawTextureDebug(SDL_GPUTexture *texture, const float x, const flo
     Renderer_FlushUIText(vertices, 4, indices, 6, &atlas, 1);
 }
 
-void Renderer_DrawFilledQuadDebug(const float x, const float y, const float width, const float height, const SDL_FColor color) {
+void Renderer_DrawFilledQuadDebug(
+    const float x, const float y, const float width, const float height, const SDL_FColor color) {
     const SDL_Vertex vertices[6] = {
         {{x, y}, color, {0, 0}},
         {{x + width, y}, color, {1, 0}},

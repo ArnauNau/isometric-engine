@@ -1,6 +1,6 @@
-#include "testbed/testbed_game.h"
 #include "logger.h"
 #include "miso_engine.h"
+#include "testbed/testbed_game.h"
 
 #include <SDL3/SDL.h>
 

@@ -135,6 +135,8 @@ void Renderer_DrawSprites(SDL_GPUTexture *texture, const SpriteInstance *instanc
 
 // Update the camera/view projection
 void Renderer_DrawLine(float x1, float y1, float z1, float x2, float y2, float z2, SDL_FColor color);
+// Draw a batched line list. `vertex_count` must be even (2 vertices per segment).
+void Renderer_DrawLineBatch(const float *vertices_xyz, int vertex_count, SDL_FColor color);
 void Renderer_DrawGeometry(const SDL_Vertex *vertices, int count);
 
 TTF_TextEngine *Renderer_GetTextEngine(void);

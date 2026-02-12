@@ -176,10 +176,10 @@ NK_INTERN bool nk_sdl_gpu_create_stream_buffers(struct nk_sdl_gpu *const sdl) {
         return false;
     }
 
-    const SDL_GPUTransferBufferCreateInfo vtx_transfer_info = {
-        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = vertex_total_size};
-    const SDL_GPUTransferBufferCreateInfo idx_transfer_info = {
-        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD, .size = index_total_size};
+    const SDL_GPUTransferBufferCreateInfo vtx_transfer_info = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+                                                               .size = vertex_total_size};
+    const SDL_GPUTransferBufferCreateInfo idx_transfer_info = {.usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+                                                               .size = index_total_size};
     sdl->gpu.vertex_transfer = SDL_CreateGPUTransferBuffer(sdl->device, &vtx_transfer_info);
     sdl->gpu.index_transfer = SDL_CreateGPUTransferBuffer(sdl->device, &idx_transfer_info);
     if (!sdl->gpu.vertex_transfer || !sdl->gpu.index_transfer) {
@@ -206,14 +206,14 @@ NK_INTERN SDL_GPUShader *nk_sdl_gpu_load_shader(SDL_GPUDevice *const device,
     }
 
     const SDL_GPUShaderCreateInfo info = {.code_size = code_size,
-                                    .code = (const Uint8 *)code,
-                                    .entrypoint = entrypoint,
-                                    .format = SDL_GPU_SHADERFORMAT_MSL,
-                                    .stage = stage,
-                                    .num_samplers = (Uint32)num_samplers,
-                                    .num_uniform_buffers = (Uint32)num_uniform_buffers,
-                                    .num_storage_buffers = 0,
-                                    .num_storage_textures = 0};
+                                          .code = (const Uint8 *)code,
+                                          .entrypoint = entrypoint,
+                                          .format = SDL_GPU_SHADERFORMAT_MSL,
+                                          .stage = stage,
+                                          .num_samplers = (Uint32)num_samplers,
+                                          .num_uniform_buffers = (Uint32)num_uniform_buffers,
+                                          .num_storage_buffers = 0,
+                                          .num_storage_textures = 0};
 
     SDL_GPUShader *const shader = SDL_CreateGPUShader(device, &info);
     SDL_free(code);
@@ -221,7 +221,10 @@ NK_INTERN SDL_GPUShader *nk_sdl_gpu_load_shader(SDL_GPUDevice *const device,
 }
 
 /* Upload font atlas to GPU texture */
-NK_INTERN void nk_sdl_gpu_upload_atlas(const struct nk_context *const ctx, const void *const image, const int width, const int height) {
+NK_INTERN void nk_sdl_gpu_upload_atlas(const struct nk_context *const ctx,
+                                       const void *const image,
+                                       const int width,
+                                       const int height) {
     struct nk_sdl_gpu *const sdl = (struct nk_sdl_gpu *)ctx->userdata.ptr;
     NK_ASSERT(sdl);
 
@@ -232,13 +235,13 @@ NK_INTERN void nk_sdl_gpu_upload_atlas(const struct nk_context *const ctx, const
     }
 
     /* Create texture */
-     const SDL_GPUTextureCreateInfo tex_info = {.type = SDL_GPU_TEXTURETYPE_2D,
-                                         .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
-                                         .width = (Uint32)width,
-                                         .height = (Uint32)height,
-                                         .layer_count_or_depth = 1,
-                                         .num_levels = 1,
-                                         .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER};
+    const SDL_GPUTextureCreateInfo tex_info = {.type = SDL_GPU_TEXTURETYPE_2D,
+                                               .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+                                               .width = (Uint32)width,
+                                               .height = (Uint32)height,
+                                               .layer_count_or_depth = 1,
+                                               .num_levels = 1,
+                                               .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER};
     sdl->gpu.font_tex = SDL_CreateGPUTexture(sdl->device, &tex_info);
     if (!sdl->gpu.font_tex) {
         SDL_Log("nuklear: Failed to create font texture");
@@ -328,7 +331,8 @@ NK_API struct nk_context *nk_sdl_gpu_init(SDL_Window *const win, SDL_GPUDevice *
     char shader_path[512] = {0};
     getResourcePath(shader_path, "shaders/nuklear.metal");
 
-    SDL_GPUShader *const vs = nk_sdl_gpu_load_shader(device, shader_path, "vertex_nuklear", 0, 1, SDL_GPU_SHADERSTAGE_VERTEX);
+    SDL_GPUShader *const vs =
+        nk_sdl_gpu_load_shader(device, shader_path, "vertex_nuklear", 0, 1, SDL_GPU_SHADERSTAGE_VERTEX);
     SDL_GPUShader *const fs =
         nk_sdl_gpu_load_shader(device, shader_path, "fragment_nuklear", 1, 0, SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!vs || !fs) {
@@ -343,22 +347,22 @@ NK_API struct nk_context *nk_sdl_gpu_init(SDL_Window *const win, SDL_GPUDevice *
 
     /* Create pipeline */
     const SDL_GPUVertexAttribute attrs[] = {{.location = 0,
-                                       .buffer_slot = 0,
-                                       .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
-                                       .offset = NK_OFFSETOF(struct nk_sdl_gpu_vertex, position)},
-                                      {.location = 1,
-                                       .buffer_slot = 0,
-                                       .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
-                                       .offset = NK_OFFSETOF(struct nk_sdl_gpu_vertex, uv)},
-                                      {.location = 2,
-                                       .buffer_slot = 0,
-                                       .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
-                                       .offset = NK_OFFSETOF(struct nk_sdl_gpu_vertex, col)}};
+                                             .buffer_slot = 0,
+                                             .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
+                                             .offset = NK_OFFSETOF(struct nk_sdl_gpu_vertex, position)},
+                                            {.location = 1,
+                                             .buffer_slot = 0,
+                                             .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT2,
+                                             .offset = NK_OFFSETOF(struct nk_sdl_gpu_vertex, uv)},
+                                            {.location = 2,
+                                             .buffer_slot = 0,
+                                             .format = SDL_GPU_VERTEXELEMENTFORMAT_FLOAT4,
+                                             .offset = NK_OFFSETOF(struct nk_sdl_gpu_vertex, col)}};
 
     const SDL_GPUVertexBufferDescription vb_desc = {.slot = 0,
-                                              .pitch = sizeof(struct nk_sdl_gpu_vertex),
-                                              .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
-                                              .instance_step_rate = 0};
+                                                    .pitch = sizeof(struct nk_sdl_gpu_vertex),
+                                                    .input_rate = SDL_GPU_VERTEXINPUTRATE_VERTEX,
+                                                    .instance_step_rate = 0};
 
     const SDL_GPUColorTargetDescription color_desc = {
         .format = SDL_GetGPUSwapchainTextureFormat(device, win),
@@ -371,17 +375,17 @@ NK_API struct nk_context *nk_sdl_gpu_init(SDL_Window *const win, SDL_GPUDevice *
                         .alpha_blend_op = SDL_GPU_BLENDOP_ADD}};
 
     const SDL_GPUGraphicsPipelineCreateInfo pipe_info = {.vertex_shader = vs,
-                                                   .fragment_shader = fs,
-                                                   .vertex_input_state = {.num_vertex_attributes = 3,
-                                                                          .vertex_attributes = attrs,
-                                                                          .num_vertex_buffers = 1,
-                                                                          .vertex_buffer_descriptions = &vb_desc},
-                                                   .target_info = {.num_color_targets = 1,
-                                                                   .color_target_descriptions = &color_desc,
-                                                                   .has_depth_stencil_target = false},
-                                                   .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
-                                                   .rasterizer_state = {.cull_mode = SDL_GPU_CULLMODE_NONE},
-                                                   .multisample_state = {.sample_count = SDL_GPU_SAMPLECOUNT_1}};
+                                                         .fragment_shader = fs,
+                                                         .vertex_input_state = {.num_vertex_attributes = 3,
+                                                                                .vertex_attributes = attrs,
+                                                                                .num_vertex_buffers = 1,
+                                                                                .vertex_buffer_descriptions = &vb_desc},
+                                                         .target_info = {.num_color_targets = 1,
+                                                                         .color_target_descriptions = &color_desc,
+                                                                         .has_depth_stencil_target = false},
+                                                         .primitive_type = SDL_GPU_PRIMITIVETYPE_TRIANGLELIST,
+                                                         .rasterizer_state = {.cull_mode = SDL_GPU_CULLMODE_NONE},
+                                                         .multisample_state = {.sample_count = SDL_GPU_SAMPLECOUNT_1}};
 
     sdl->gpu.pipeline = SDL_CreateGPUGraphicsPipeline(device, &pipe_info);
     SDL_ReleaseGPUShader(device, vs);
@@ -395,10 +399,10 @@ NK_API struct nk_context *nk_sdl_gpu_init(SDL_Window *const win, SDL_GPUDevice *
 
     /* Create sampler (linear filtering for smooth text) */
     const SDL_GPUSamplerCreateInfo smp_info = {.min_filter = SDL_GPU_FILTER_LINEAR,
-                                         .mag_filter = SDL_GPU_FILTER_LINEAR,
-                                         .mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
-                                         .address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
-                                         .address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE};
+                                               .mag_filter = SDL_GPU_FILTER_LINEAR,
+                                               .mipmap_mode = SDL_GPU_SAMPLERMIPMAPMODE_NEAREST,
+                                               .address_mode_u = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE,
+                                               .address_mode_v = SDL_GPU_SAMPLERADDRESSMODE_CLAMP_TO_EDGE};
     sdl->gpu.sampler = SDL_CreateGPUSampler(device, &smp_info);
     if (!sdl->gpu.sampler) {
         SDL_Log("nuklear: Failed to create sampler");
@@ -712,7 +716,8 @@ NK_API void nk_sdl_gpu_render(struct nk_context *const ctx,
     const SDL_GPUBufferRegion dst_v = {.buffer = sdl->gpu.vertex_buffer, .offset = vertex_offset, .size = vert_size};
     SDL_UploadToGPUBuffer(copy, &src_v, &dst_v, false);
 
-    const SDL_GPUTransferBufferLocation src_i = {.transfer_buffer = sdl->gpu.index_transfer, .offset = index_offset_bytes};
+    const SDL_GPUTransferBufferLocation src_i = {.transfer_buffer = sdl->gpu.index_transfer,
+                                                 .offset = index_offset_bytes};
     const SDL_GPUBufferRegion dst_i = {.buffer = sdl->gpu.index_buffer, .offset = index_offset_bytes, .size = idx_size};
     SDL_UploadToGPUBuffer(copy, &src_i, &dst_i, false);
     SDL_EndGPUCopyPass(copy);
@@ -721,21 +726,21 @@ NK_API void nk_sdl_gpu_render(struct nk_context *const ctx,
     int win_w, win_h;
     SDL_GetWindowSizeInPixels(sdl->win, &win_w, &win_h);
     const float projection[16] = {2.0f / (float)win_w,
-                            0.0f,
-                            0.0f,
-                            0.0f,
-                            0.0f,
-                            -2.0f / (float)win_h,
-                            0.0f,
-                            0.0f,
-                            0.0f,
-                            0.0f,
-                            1.0f,
-                            0.0f,
-                            -1.0f,
-                            1.0f,
-                            0.0f,
-                            1.0f};
+                                  0.0f,
+                                  0.0f,
+                                  0.0f,
+                                  0.0f,
+                                  -2.0f / (float)win_h,
+                                  0.0f,
+                                  0.0f,
+                                  0.0f,
+                                  0.0f,
+                                  1.0f,
+                                  0.0f,
+                                  -1.0f,
+                                  1.0f,
+                                  0.0f,
+                                  1.0f};
 
     /* Begin render pass */
     const SDL_GPUColorTargetInfo color_target = {
@@ -743,7 +748,8 @@ NK_API void nk_sdl_gpu_render(struct nk_context *const ctx,
     SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, nullptr);
 
     SDL_BindGPUGraphicsPipeline(pass, sdl->gpu.pipeline);
-    SDL_BindGPUVertexBuffers(pass, 0, &(SDL_GPUBufferBinding){.buffer = sdl->gpu.vertex_buffer, .offset = vertex_offset}, 1);
+    SDL_BindGPUVertexBuffers(
+        pass, 0, &(SDL_GPUBufferBinding){.buffer = sdl->gpu.vertex_buffer, .offset = vertex_offset}, 1);
     SDL_BindGPUIndexBuffer(pass,
                            &(SDL_GPUBufferBinding){.buffer = sdl->gpu.index_buffer, .offset = index_offset_bytes},
                            sizeof(nk_draw_index) == 2 ? SDL_GPU_INDEXELEMENTSIZE_16BIT

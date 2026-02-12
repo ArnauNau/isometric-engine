@@ -13,13 +13,12 @@
 #include <SDL3_ttf/SDL_ttf.h>
 #include <stdarg.h>
 #include <stddef.h>
-#include <stdio.h>
 
 #define WINDOW_WIDTH 1920
 #define WINDOW_HEIGHT 1080
 #define TILE_SIZE 32
 #define MAP_SIZE_X 70
-#define MAP_SIZE_Y 40
+#define MAP_SIZE_Y 50
 #define MAX_BUILDINGS 512
 
 typedef enum TileType_ {
@@ -46,8 +45,8 @@ typedef struct RenderableComponent_ {
 } RenderableComponent;
 
 typedef struct WireframeMesh_ {
-    SDL_Vertex *verts;
-    int vert_count;
+    float *line_vertices;
+    int vertex_count;
 } WireframeMesh;
 
 struct TestbedGame {
@@ -84,6 +83,10 @@ struct TestbedGame {
     TransformComponent transforms[MAX_BUILDINGS];
     BuildingComponent buildings[MAX_BUILDINGS];
     WireframeMesh wireframe_meshes[MAX_BUILDINGS];
+    SpriteInstance *building_instances;
+    int building_instances_capacity;
+    float *wireframe_line_scratch;
+    size_t wireframe_line_scratch_capacity_vertices;
 
     TTF_Font *profiler_font;
     MisoFontHandle hud_font;
@@ -152,8 +155,86 @@ static void testbed_sync_window_metrics(TestbedGame *game) {
     }
 }
 
-static void testbed_render_tile_highlight(const TestbedGame *game, const int tile_x, const int tile_y, const SDL_FColor color) {
-    if (!game->tilemap || tile_x < 0 || tile_y < 0 || tile_x >= game->tilemap->width || tile_y >= game->tilemap->height) {
+static bool testbed_ensure_building_instance_capacity(TestbedGame *game, const int needed_instances) {
+    if (!game || needed_instances <= 0) {
+        return false;
+    }
+    if (needed_instances <= game->building_instances_capacity) {
+        return true;
+    }
+
+    int new_capacity = game->building_instances_capacity > 0 ? game->building_instances_capacity : 512;
+    while (new_capacity < needed_instances) {
+        new_capacity *= 2;
+    }
+
+    SpriteInstance *new_instances =
+        SDL_realloc(game->building_instances, sizeof(SpriteInstance) * (size_t)new_capacity);
+    if (!new_instances) {
+        SDL_LogWarn(
+            SDL_LOG_CATEGORY_RENDER, "testbed: failed to grow building instance scratch to %d", needed_instances);
+        return false;
+    }
+
+    game->building_instances = new_instances;
+    game->building_instances_capacity = new_capacity;
+    return true;
+}
+
+static bool testbed_ensure_wireframe_line_capacity(TestbedGame *game, const size_t needed_vertices) {
+    if (!game || needed_vertices == 0U) {
+        return false;
+    }
+    if (needed_vertices <= game->wireframe_line_scratch_capacity_vertices) {
+        return true;
+    }
+
+    size_t new_capacity =
+        game->wireframe_line_scratch_capacity_vertices > 0U ? game->wireframe_line_scratch_capacity_vertices : 2048U;
+    while (new_capacity < needed_vertices) {
+        new_capacity *= 2U;
+    }
+
+    float *new_scratch = SDL_realloc(game->wireframe_line_scratch, sizeof(float) * new_capacity * 3U);
+    if (!new_scratch) {
+        SDL_LogWarn(
+            SDL_LOG_CATEGORY_RENDER, "testbed: failed to grow wireframe scratch to %zu vertices", needed_vertices);
+        return false;
+    }
+
+    game->wireframe_line_scratch = new_scratch;
+    game->wireframe_line_scratch_capacity_vertices = new_capacity;
+    return true;
+}
+
+static bool testbed_wireframe_push_line(float *line_vertices,
+                                        const int vertex_capacity,
+                                        int *const vertex_count,
+                                        const float x1,
+                                        const float y1,
+                                        const float z1,
+                                        const float x2,
+                                        const float y2,
+                                        const float z2) {
+    if (!line_vertices || !vertex_count || *vertex_count + 2 > vertex_capacity) {
+        return false;
+    }
+
+    const int base = *vertex_count * 3;
+    line_vertices[base + 0] = x1;
+    line_vertices[base + 1] = y1;
+    line_vertices[base + 2] = z1;
+    line_vertices[base + 3] = x2;
+    line_vertices[base + 4] = y2;
+    line_vertices[base + 5] = z2;
+    *vertex_count += 2;
+    return true;
+}
+
+static void
+testbed_render_tile_highlight(const TestbedGame *game, const int tile_x, const int tile_y, const SDL_FColor color) {
+    if (!game->tilemap || tile_x < 0 || tile_y < 0 || tile_x >= game->tilemap->width ||
+        tile_y >= game->tilemap->height) {
         return;
     }
 
@@ -186,128 +267,113 @@ static void testbed_render_tile_highlight(const TestbedGame *game, const int til
 }
 
 static WireframeMesh testbed_build_wireframe_mesh(const float iso_x,
-                                                 const float iso_y,
-                                                 const float iso_w,
-                                                 const float iso_h,
-                                                 const int bw,
-                                                 const int bl,
-                                                 const int sw,
-                                                 const int sh) {
+                                                  const float iso_y,
+                                                  const float iso_w,
+                                                  const float iso_h,
+                                                  const int bw,
+                                                  const int bl,
+                                                  const int sw,
+                                                  const int sh,
+                                                  const float depth) {
     const float half_w = iso_w * 0.5f;
     const float half_h = iso_h * 0.5f;
     const float tile_h = iso_h * 2.0f;
     const float base_y = iso_y + tile_h * (float)sh;
-    const SDL_FColor col = {0.0f, 1.0f, 1.0f, 1.0f};
-    WireframeMesh thin_mesh = {0};
 
-    {
-        const int max_lines = (bw + bl) + bw * (sh + 1) + bl * (sh + 1) + (bw + 1) * (bl + 1);
-        const int num_vertices = max_lines * 2 + (3 - ((max_lines * 2) % 3));
-        SDL_Vertex *v = SDL_malloc(sizeof(SDL_Vertex) * (unsigned int)num_vertices);
-        int idx = 0;
+    const int max_lines = (bw + bl) + bw * (sh + 1) + bl * (sh + 1) + (bw + 1) * (bl + 1);
+    const int vertex_capacity = max_lines * 2;
+    float *line_vertices = SDL_malloc(sizeof(float) * (size_t)vertex_capacity * 3U);
+    if (!line_vertices) {
+        return (WireframeMesh){0};
+    }
 
-        for (int x = 0; x < bw; x++) {
-            const float vx = iso_x + half_w * (float)x;
-            const float vb = base_y - half_h * (float)(bw - x);
-            const float vt = vb - iso_h * (float)sh;
-            v[idx++] = (SDL_Vertex){{vx, vb}, col, {0, 0}};
-            v[idx++] = (SDL_Vertex){{vx, vt}, col, {0, 0}};
-            for (int y = 0; y <= sh; y++) {
-                const float dy = vb - iso_h * (float)y;
-                v[idx++] = (SDL_Vertex){{vx, dy}, col, {0, 0}};
-                v[idx++] = (SDL_Vertex){{vx + half_w, dy + half_h}, col, {0, 0}};
+    int vertex_count = 0;
+
+    for (int x = 0; x < bw; x++) {
+        const float vx = iso_x + half_w * (float)x;
+        const float vb = base_y - half_h * (float)(bw - x);
+        const float vt = vb - iso_h * (float)sh;
+        if (!testbed_wireframe_push_line(line_vertices, vertex_capacity, &vertex_count, vx, vb, depth, vx, vt, depth)) {
+            goto fail;
+        }
+        for (int y = 0; y <= sh; y++) {
+            const float dy = vb - iso_h * (float)y;
+            if (!testbed_wireframe_push_line(
+                    line_vertices, vertex_capacity, &vertex_count, vx, dy, depth, vx + half_w, dy + half_h, depth)) {
+                goto fail;
             }
         }
+    }
 
-        for (int x = 0; x <= bl; x++) {
-            const float vx = iso_x + iso_w * (float)(bw + x) * 0.5f;
-            const float vb = base_y - iso_h * 0.5f * (float)x;
-            const float vt = vb - iso_h * (float)sh;
-            v[idx++] = (SDL_Vertex){{vx, vb}, col, {0, 0}};
-            v[idx++] = (SDL_Vertex){{vx, vt}, col, {0, 0}};
-            if (x < bl) {
-                for (int y = 0; y <= sh; y++) {
-                    const float dy = vb - iso_h * (float)y;
-                    v[idx++] = (SDL_Vertex){{vx, dy}, col, {0, 0}};
-                    v[idx++] = (SDL_Vertex){{vx + half_w, dy - half_h}, col, {0, 0}};
+    for (int x = 0; x <= bl; x++) {
+        const float vx = iso_x + iso_w * (float)(bw + x) * 0.5f;
+        const float vb = base_y - iso_h * 0.5f * (float)x;
+        const float vt = vb - iso_h * (float)sh;
+        if (!testbed_wireframe_push_line(line_vertices, vertex_capacity, &vertex_count, vx, vb, depth, vx, vt, depth)) {
+            goto fail;
+        }
+
+        if (x < bl) {
+            for (int y = 0; y <= sh; y++) {
+                const float dy = vb - iso_h * (float)y;
+                if (!testbed_wireframe_push_line(line_vertices,
+                                                 vertex_capacity,
+                                                 &vertex_count,
+                                                 vx,
+                                                 dy,
+                                                 depth,
+                                                 vx + half_w,
+                                                 dy - half_h,
+                                                 depth)) {
+                    goto fail;
                 }
             }
         }
+    }
 
-        const SDL_FPoint roof_fl = {iso_x, base_y - half_h * (float)bw - iso_h * (float)sh};
-        const SDL_FPoint roof_fr = {
-            iso_x + half_w * (float)bw,
-            base_y - half_h * (float)bw - iso_h * (float)sh + half_h * (float)bw
-        };
-        const SDL_FPoint roof_bl = {iso_x + half_w * (float)bl, roof_fl.y - half_h * (float)bl};
-        const SDL_FPoint dv_len = {half_w, -half_h};
-        const SDL_FPoint dv_width = {half_w, half_h};
+    const SDL_FPoint roof_fl = {iso_x, base_y - half_h * (float)bw - iso_h * (float)sh};
+    const SDL_FPoint roof_fr = {iso_x + half_w * (float)bw,
+                                base_y - half_h * (float)bw - iso_h * (float)sh + half_h * (float)bw};
+    const SDL_FPoint roof_bl = {iso_x + half_w * (float)bl, roof_fl.y - half_h * (float)bl};
+    const SDL_FPoint dv_len = {half_w, -half_h};
+    const SDL_FPoint dv_width = {half_w, half_h};
 
-        for (int i = 1; i <= bl; i++) {
-            SDL_FPoint p0 = {roof_fl.x + dv_len.x * (float)i, roof_fl.y + dv_len.y * (float)i};
-            SDL_FPoint p1 = {roof_fr.x + dv_len.x * (float)i, roof_fr.y + dv_len.y * (float)i};
-            v[idx++] = (SDL_Vertex){p0, col, {0, 0}};
-            v[idx++] = (SDL_Vertex){p1, col, {0, 0}};
+    for (int i = 1; i <= bl; i++) {
+        SDL_FPoint p0 = {roof_fl.x + dv_len.x * (float)i, roof_fl.y + dv_len.y * (float)i};
+        SDL_FPoint p1 = {roof_fr.x + dv_len.x * (float)i, roof_fr.y + dv_len.y * (float)i};
+        if (!testbed_wireframe_push_line(
+                line_vertices, vertex_capacity, &vertex_count, p0.x, p0.y, depth, p1.x, p1.y, depth)) {
+            goto fail;
         }
+    }
 
-        for (int j = 0; j < bw; j++) {
-            SDL_FPoint p0 = {roof_fl.x + dv_width.x * (float)j, roof_fl.y + dv_width.y * (float)j};
-            SDL_FPoint p1 = {roof_bl.x + dv_width.x * (float)j, roof_bl.y + dv_width.y * (float)j};
-            v[idx++] = (SDL_Vertex){p0, col, {0, 0}};
-            v[idx++] = (SDL_Vertex){p1, col, {0, 0}};
+    for (int j = 0; j < bw; j++) {
+        SDL_FPoint p0 = {roof_fl.x + dv_width.x * (float)j, roof_fl.y + dv_width.y * (float)j};
+        SDL_FPoint p1 = {roof_bl.x + dv_width.x * (float)j, roof_bl.y + dv_width.y * (float)j};
+        if (!testbed_wireframe_push_line(
+                line_vertices, vertex_capacity, &vertex_count, p0.x, p0.y, depth, p1.x, p1.y, depth)) {
+            goto fail;
         }
-
-        const int remaining = num_vertices - idx;
-        for (int i = 0; i < remaining; i++) {
-            const SDL_Vertex last = v[idx - 1];
-            v[idx++] = last;
-        }
-
-        thin_mesh = (WireframeMesh){.verts = v, .vert_count = idx};
     }
 
     (void)sw;
-    const int segments = thin_mesh.vert_count / 2;
-    const int max_verts = segments * 6;
-    SDL_Vertex *v = SDL_malloc(sizeof(SDL_Vertex) * (unsigned int)max_verts);
-    int idx = 0;
+    return (WireframeMesh){.line_vertices = line_vertices, .vertex_count = vertex_count};
 
-    for (int i = 0; i < segments; ++i) {
-        constexpr float thickness = 1.0f;
-        const SDL_FPoint p1 = thin_mesh.verts[2 * i].position;
-        const SDL_FPoint p2 = thin_mesh.verts[2 * i + 1].position;
-        float dx = p2.x - p1.x;
-        float dy = p2.y - p1.y;
-        const float len = SDL_sqrtf(dx * dx + dy * dy);
-        if (len < 1e-6f) {
-            continue;
-        }
-        dx /= len;
-        dy /= len;
-        const float nx = -dy * (thickness * 0.5f);
-        const float ny = dx * (thickness * 0.5f);
-
-        const SDL_FPoint q1 = {p1.x + nx, p1.y + ny};
-        const SDL_FPoint q2 = {p2.x + nx, p2.y + ny};
-        const SDL_FPoint q3 = {p2.x - nx, p2.y - ny};
-        const SDL_FPoint q4 = {p1.x - nx, p1.y - ny};
-
-        v[idx++] = (SDL_Vertex){q1, col, {0, 0}};
-        v[idx++] = (SDL_Vertex){q2, col, {0, 0}};
-        v[idx++] = (SDL_Vertex){q3, col, {0, 0}};
-        v[idx++] = (SDL_Vertex){q3, col, {0, 0}};
-        v[idx++] = (SDL_Vertex){q4, col, {0, 0}};
-        v[idx++] = (SDL_Vertex){q1, col, {0, 0}};
-    }
-
-    SDL_free(thin_mesh.verts);
-    return (WireframeMesh){.verts = v, .vert_count = idx};
+fail:
+    SDL_free(line_vertices);
+    return (WireframeMesh){0};
 }
 
-static void testbed_render_buildings(const TestbedGame *const game) {
+static void testbed_render_buildings(TestbedGame *const game) {
     PROF_start(PROFILER_RENDER_BUILDINGS);
 
-    if (!game->tilemap) {
+    if (!game || !game->tilemap) {
+        PROF_stop(PROFILER_RENDER_BUILDINGS);
+        return;
+    }
+
+    const int needed_instances = game->building_count + 1;
+    if (!testbed_ensure_building_instance_capacity(game, needed_instances)) {
         PROF_stop(PROFILER_RENDER_BUILDINGS);
         return;
     }
@@ -319,11 +385,7 @@ static void testbed_render_buildings(const TestbedGame *const game) {
     const float start_x = (float)(game->tilemap->height - 1) * iso_w / 2.0f;
     const float start_y = 0.0f;
 
-    SpriteInstance *instances = SDL_malloc(sizeof(SpriteInstance) * (size_t)(game->building_count + 1));
-    if (!instances) {
-        PROF_stop(PROFILER_RENDER_BUILDINGS);
-        return;
-    }
+    SpriteInstance *instances = game->building_instances;
     int instance_count = 0;
 
     const float tex_w = (float)(game->tilemap->tileset->columns * game->tilemap->tileset->tile_width);
@@ -349,8 +411,7 @@ static void testbed_render_buildings(const TestbedGame *const game) {
         const float uw = (float)(bw * tile_w) / tex_w;
         const float vh = (float)(bh * tile_h) / tex_h;
 
-        const float depth =
-            1.0f - (float)(mx + my) / (float)(game->tilemap->width + game->tilemap->height) - 0.001f;
+        const float depth = 1.0f - (float)(mx + my) / (float)(game->tilemap->width + game->tilemap->height) - 0.001f;
 
         instances[instance_count++] = (SpriteInstance){.x = iso_x,
                                                        .y = iso_y,
@@ -367,7 +428,6 @@ static void testbed_render_buildings(const TestbedGame *const game) {
     }
 
     Renderer_DrawSprites(game->tilemap->tileset->texture, instances, instance_count);
-    SDL_free(instances);
 
     PROF_stop(PROFILER_RENDER_BUILDINGS);
 }
@@ -407,7 +467,9 @@ static void testbed_spawn_boat(TestbedGame *game, const int x, const int y) {
     const float start_y = 0.0f;
     const float iso_x = start_x + (float)(x - y) * iso_w * 0.5f - (b_w_ - 1.0f) * iso_w * 0.5f;
     const float iso_y = start_y + (float)(x + y) * iso_h * 0.5f - tile_h - b_h_ * iso_h;
-    game->wireframe_meshes[game->building_count] = testbed_build_wireframe_mesh(iso_x, iso_y, iso_w, iso_h, 1, 3, 2, 3);
+    const float wire_depth = 1.0f - (float)(x + y) / (float)(game->tilemap->width + game->tilemap->height) - 0.0015f;
+    game->wireframe_meshes[game->building_count] =
+        testbed_build_wireframe_mesh(iso_x, iso_y, iso_w, iso_h, 1, 3, 2, 3, wire_depth);
 
     game->building_count++;
 }
@@ -452,8 +514,10 @@ static void testbed_spawn_boats(TestbedGame *game, const int amount) {
                 const float start_y = 0.0f;
                 const float iso_x = start_x + (float)(x - y) * iso_w * 0.5f - (b_w_ - 1.0f) * iso_w * 0.5f;
                 const float iso_y = start_y + (float)(x + y) * iso_h * 0.5f - tile_h - b_h_ * iso_h;
+                const float wire_depth =
+                    1.0f - (float)(x + y) / (float)(game->tilemap->width + game->tilemap->height) - 0.0015f;
                 game->wireframe_meshes[game->building_count] =
-                    testbed_build_wireframe_mesh(iso_x, iso_y, iso_w, iso_h, 1, 3, 2, 3);
+                    testbed_build_wireframe_mesh(iso_x, iso_y, iso_w, iso_h, 1, 3, 2, 3, wire_depth);
 
                 game->building_count++;
                 count++;
@@ -561,7 +625,8 @@ static void testbed_game_on_event(void *ctx, const MisoEvent *event) {
         if (event->data.mouse_button.button == MISO_MOUSE_BUTTON_LEFT && event->data.mouse_button.down) {
             if (game->hover_tile.x >= 0 && game->hover_tile.y >= 0 && game->tilemap &&
                 game->hover_tile.x < game->tilemap->width && game->hover_tile.y < game->tilemap->height &&
-                game->building_count < MAX_BUILDINGS && Tilemap_IsTileFree(game->tilemap, game->hover_tile.x, game->hover_tile.y)) {
+                game->building_count < MAX_BUILDINGS &&
+                Tilemap_IsTileFree(game->tilemap, game->hover_tile.x, game->hover_tile.y)) {
                 testbed_spawn_boat(game, game->hover_tile.x, game->hover_tile.y);
             }
         }
@@ -587,7 +652,8 @@ static void testbed_game_on_event(void *ctx, const MisoEvent *event) {
 
     case MISO_EVENT_MOUSE_WHEEL:
         if (event->data.mouse_wheel.y != 0.0f) {
-            miso_camera_zoom_at_screen(game->engine, game->camera_id, event->data.mouse_wheel.y, game->mouse_x, game->mouse_y);
+            miso_camera_zoom_at_screen(
+                game->engine, game->camera_id, event->data.mouse_wheel.y, game->mouse_x, game->mouse_y);
             game->camera_zoom = miso_camera_get_zoom(game->engine, game->camera_id);
             const MisoVec2 cam_pos = miso_camera_get_position(game->engine, game->camera_id);
             game->camera_x = cam_pos.x;
@@ -610,7 +676,8 @@ static void testbed_game_on_sim_tick(void *ctx, float fixed_dt_seconds) {
 }
 
 static void testbed_render_hud_line(TestbedGame *game, float x, float y, const char *text) {
-    if (!game || !text || !testbed_is_point_in_rect(x, y, &(SDL_FRect){0, 0, (float)game->screen_width, (float)game->screen_height})) {
+    if (!game || !text ||
+        !testbed_is_point_in_rect(x, y, &(SDL_FRect){0, 0, (float)game->screen_width, (float)game->screen_height})) {
         return;
     }
 
@@ -631,7 +698,8 @@ static void testbed_game_on_render_world(void *ctx, MisoEngine *engine) {
     }
 
     miso_render_begin_world(engine, game->camera_id);
-    miso_render_set_water_params(engine, game->game_clock.total, game->wave_speed, game->wave_amplitude, game->wave_phase);
+    miso_render_set_water_params(
+        engine, game->game_clock.total, game->wave_speed, game->wave_amplitude, game->wave_phase);
 
     PROF_start(PROFILER_RENDER_MAP);
     Tilemap_Render(game->tilemap);
@@ -640,25 +708,34 @@ static void testbed_game_on_render_world(void *ctx, MisoEngine *engine) {
     testbed_render_buildings(game);
     testbed_render_tile_highlight(game, game->hover_tile.x, game->hover_tile.y, (SDL_FColor){0.0f, 1.0f, 1.0f, 1.0f});
 
-    Renderer_DrawTextureDebug(game->tilemap->tileset->texture, 50.0f, (float)game->screen_height - 384.0f - 50.0f, 192.0f, 384.0f);
+    Renderer_DrawTextureDebug(
+        game->tilemap->tileset->texture, 50.0f, (float)game->screen_height - 384.0f - 50.0f, 192.0f, 384.0f);
 
     if (game->wireframe_mode) {
         PROF_start(PROFILER_RENDER_WIREFRAMES);
-        size_t total_vert_count = 0;
+        size_t total_vertex_count = 0;
         for (int i = 0; i < game->building_count; i++) {
-            total_vert_count += (size_t)game->wireframe_meshes[i].vert_count;
+            total_vertex_count += (size_t)game->wireframe_meshes[i].vertex_count;
         }
-        SDL_Vertex *combined = SDL_malloc(sizeof(SDL_Vertex) * total_vert_count);
-        if (combined) {
-            size_t offset = 0;
+
+        if (total_vertex_count > 0 && testbed_ensure_wireframe_line_capacity(game, total_vertex_count)) {
+            size_t offset_vertices = 0;
             for (int i = 0; i < game->building_count; i++) {
-                SDL_memcpy(combined + offset,
-                           game->wireframe_meshes[i].verts,
-                           sizeof(SDL_Vertex) * (size_t)game->wireframe_meshes[i].vert_count);
-                offset += (size_t)game->wireframe_meshes[i].vert_count;
+                const WireframeMesh *mesh = &game->wireframe_meshes[i];
+                if (!mesh->line_vertices || mesh->vertex_count <= 0) {
+                    continue;
+                }
+                const size_t copy_floats = (size_t)mesh->vertex_count * 3U;
+                SDL_memcpy(game->wireframe_line_scratch + (offset_vertices * 3U),
+                           mesh->line_vertices,
+                           sizeof(float) * copy_floats);
+                offset_vertices += (size_t)mesh->vertex_count;
             }
-            Renderer_DrawGeometry(combined, (int)offset);
-            SDL_free(combined);
+
+            if (offset_vertices > 0) {
+                Renderer_DrawLineBatch(
+                    game->wireframe_line_scratch, (int)offset_vertices, (SDL_FColor){0.0f, 1.0f, 1.0f, 1.0f});
+            }
         }
         PROF_stop(PROFILER_RENDER_WIREFRAMES);
     }
@@ -729,11 +806,11 @@ static void testbed_game_on_render_debug(void *ctx, MisoEngine *const engine) {
 
     struct nk_context *nk = miso_debug_ui_get_context();
     const float ui_s = miso_debug_ui_get_scale();
-    if (nk && nk_begin(nk,
-                       "Debug",
-                       nk_rect(50 * ui_s, 400 * ui_s, 300 * ui_s, 430 * ui_s),
-                       NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_MINIMIZABLE |
-                           NK_WINDOW_TITLE)) {
+    if (nk &&
+        nk_begin(nk,
+                 "Debug",
+                 nk_rect(50 * ui_s, 400 * ui_s, 300 * ui_s, 430 * ui_s),
+                 NK_WINDOW_BORDER | NK_WINDOW_MOVABLE | NK_WINDOW_SCALABLE | NK_WINDOW_MINIMIZABLE | NK_WINDOW_TITLE)) {
         nk_layout_row_dynamic(nk, 25 * ui_s, 1);
         testbed_nk_labelf(nk, NK_TEXT_LEFT, "Buildings: %d", game->building_count);
         testbed_nk_labelf(nk, NK_TEXT_LEFT, "Hover: (%d, %d)", game->hover_tile.x, game->hover_tile.y);
@@ -773,67 +850,68 @@ static void testbed_game_on_render_debug(void *ctx, MisoEngine *const engine) {
             testbed_nk_labelf(
                 nk, NK_TEXT_LEFT, "World/UI passes: %u / %u", stats.passes.world_passes, stats.passes.ui_passes);
             testbed_nk_labelf(nk,
-                             NK_TEXT_LEFT,
-                             "Sprite cmds/draws: %u / %u",
-                             queues[MISO_RENDER_STATS_QUEUE_SPRITE].cmd_count,
-                             queues[MISO_RENDER_STATS_QUEUE_SPRITE].draw_calls);
-            testbed_nk_labelf(
-                nk, NK_TEXT_LEFT, "UI text cmds/draws: %u / %u",
-                queues[MISO_RENDER_STATS_QUEUE_UI_TEXT].cmd_count,
-                queues[MISO_RENDER_STATS_QUEUE_UI_TEXT].draw_calls);
+                              NK_TEXT_LEFT,
+                              "Sprite cmds/draws: %u / %u",
+                              queues[MISO_RENDER_STATS_QUEUE_SPRITE].cmd_count,
+                              queues[MISO_RENDER_STATS_QUEUE_SPRITE].draw_calls);
+            testbed_nk_labelf(nk,
+                              NK_TEXT_LEFT,
+                              "UI text cmds/draws: %u / %u",
+                              queues[MISO_RENDER_STATS_QUEUE_UI_TEXT].cmd_count,
+                              queues[MISO_RENDER_STATS_QUEUE_UI_TEXT].draw_calls);
             testbed_nk_labelf(
                 nk, NK_TEXT_LEFT, "Present mode: %s", testbed_present_mode_name(Renderer_GetPresentMode()));
             testbed_nk_labelf(nk, NK_TEXT_LEFT, "Pixel density: %.2f", game->pixel_ratio);
             testbed_nk_labelf(nk, NK_TEXT_LEFT, "Acquire swapchain: %.3f ms", stats.timing.swapchain_acquire_ms);
             testbed_nk_labelf(nk, NK_TEXT_LEFT, "Submit cmd buffer: %.3f ms", stats.timing.submit_ms);
             testbed_nk_labelf(nk,
-                             NK_TEXT_LEFT,
-                             "Sprite stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_SPRITE].used_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_SPRITE].capacity_bytes),
-                             testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_SPRITE].used_bytes,
-                                                  streams[MISO_RENDER_STATS_STREAM_SPRITE].capacity_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_SPRITE].peak_bytes));
+                              NK_TEXT_LEFT,
+                              "Sprite stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_SPRITE].used_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_SPRITE].capacity_bytes),
+                              testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_SPRITE].used_bytes,
+                                                    streams[MISO_RENDER_STATS_STREAM_SPRITE].capacity_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_SPRITE].peak_bytes));
             testbed_nk_labelf(nk,
-                             NK_TEXT_LEFT,
-                             "World geom stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].used_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].capacity_bytes),
-                             testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].used_bytes,
-                                                  streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].capacity_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].peak_bytes));
+                              NK_TEXT_LEFT,
+                              "World geom stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].used_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].capacity_bytes),
+                              testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].used_bytes,
+                                                    streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].capacity_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].peak_bytes));
             testbed_nk_labelf(nk,
-                             NK_TEXT_LEFT,
-                             "Line stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_LINE].used_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_LINE].capacity_bytes),
-                             testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_LINE].used_bytes,
-                                                  streams[MISO_RENDER_STATS_STREAM_LINE].capacity_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_LINE].peak_bytes));
+                              NK_TEXT_LEFT,
+                              "Line stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_LINE].used_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_LINE].capacity_bytes),
+                              testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_LINE].used_bytes,
+                                                    streams[MISO_RENDER_STATS_STREAM_LINE].capacity_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_LINE].peak_bytes));
             testbed_nk_labelf(nk,
-                             NK_TEXT_LEFT,
-                             "UI geom stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].used_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].capacity_bytes),
-                             testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].used_bytes,
-                                                  streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].capacity_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].peak_bytes));
+                              NK_TEXT_LEFT,
+                              "UI geom stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].used_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].capacity_bytes),
+                              testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].used_bytes,
+                                                    streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].capacity_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].peak_bytes));
             testbed_nk_labelf(nk,
-                             NK_TEXT_LEFT,
-                             "UI text vert stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].used_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].capacity_bytes),
-                             testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].used_bytes,
-                                                  streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].capacity_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].peak_bytes));
+                              NK_TEXT_LEFT,
+                              "UI text vert stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].used_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].capacity_bytes),
+                              testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].used_bytes,
+                                                    streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].capacity_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].peak_bytes));
             testbed_nk_labelf(nk,
-                             NK_TEXT_LEFT,
-                             "UI text idx stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].used_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].capacity_bytes),
-                             testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].used_bytes,
-                                                  streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].capacity_bytes),
-                             testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].peak_bytes));
+                              NK_TEXT_LEFT,
+                              "UI text idx stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].used_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].capacity_bytes),
+                              testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].used_bytes,
+                                                    streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].capacity_bytes),
+                              testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].peak_bytes));
         }
     }
     nk_end(nk);
@@ -841,17 +919,18 @@ static void testbed_game_on_render_debug(void *ctx, MisoEngine *const engine) {
     PROF_stop(PROFILER_NUKLEAR);
 }
 
-static MisoResult testbed_game_on_save(void *const game_ctx, MisoByteBuffer *const out_payload, uint32_t *const out_payload_version) {
+static MisoResult
+testbed_game_on_save(void *const game_ctx, MisoByteBuffer *const out_payload, uint32_t *const out_payload_version) {
     (void)game_ctx;
     (void)out_payload;
     (void)out_payload_version;
     return MISO_ERR_UNSUPPORTED;
 }
 
-static MisoResult
-testbed_game_on_load(void *const game_ctx, const uint8_t *const payload,
-                                      const size_t payload_size,
-                                      const uint32_t payload_version) {
+static MisoResult testbed_game_on_load(void *const game_ctx,
+                                       const uint8_t *const payload,
+                                       const size_t payload_size,
+                                       const uint32_t payload_version) {
     (void)game_ctx;
     (void)payload;
     (void)payload_size;
@@ -895,7 +974,8 @@ static void testbed_populate_demo_map(const TestbedGame *const game) {
             const int i = y * game->tilemap->width + x;
             int tile_index = (i % 2) ? 0 : 36;
 
-            if (i > (game->tilemap->width * game->tilemap->height) - (game->tilemap->width / 2) * (game->tilemap->height / 2)) {
+            if (i > (game->tilemap->width * game->tilemap->height) -
+                        (game->tilemap->width / 2) * (game->tilemap->height / 2)) {
                 tile_index = TILE_PLACEHOLDER_SEA;
                 Tilemap_SetFlags(game->tilemap, x, y, TILE_FLAG_WATER);
             }
@@ -926,6 +1006,11 @@ MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
     game->wave_speed = 0.2f;
     game->wave_amplitude = 0.5f;
     game->wave_phase = 0.1f;
+
+    if (!testbed_ensure_building_instance_capacity(game, MAX_BUILDINGS + 1)) {
+        SDL_free(game);
+        return MISO_ERR_OUT_OF_MEMORY;
+    }
 
     game->camera_id = miso_camera_create(engine);
     if (game->camera_id == 0) {
@@ -988,9 +1073,18 @@ void testbed_game_destroy(TestbedGame *game) {
     }
 
     for (int i = 0; i < game->building_count; i++) {
-        SDL_free(game->wireframe_meshes[i].verts);
-        game->wireframe_meshes[i].verts = NULL;
+        SDL_free(game->wireframe_meshes[i].line_vertices);
+        game->wireframe_meshes[i].line_vertices = NULL;
+        game->wireframe_meshes[i].vertex_count = 0;
     }
+
+    SDL_free(game->wireframe_line_scratch);
+    game->wireframe_line_scratch = NULL;
+    game->wireframe_line_scratch_capacity_vertices = 0U;
+
+    SDL_free(game->building_instances);
+    game->building_instances = NULL;
+    game->building_instances_capacity = 0;
 
     if (game->tilemap) {
         Tilemap_Destroy(game->tilemap);
