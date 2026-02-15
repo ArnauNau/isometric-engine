@@ -90,6 +90,15 @@ struct TestbedGame {
 
     TTF_Font *profiler_font;
     MisoFontHandle hud_font;
+
+    bool benchmark_mode;
+    bool benchmark_debug_ui_enabled;
+    bool benchmark_profiler_enabled;
+    TestbedBenchDiagnosticMode benchmark_diagnostic_mode;
+    TestbedBenchCameraState benchmark_camera_state;
+    float benchmark_camera_x;
+    float benchmark_camera_y;
+    float benchmark_camera_zoom;
 };
 
 static int testbed_is_point_in_rect(const float x, const float y, const SDL_FRect *const SDL_RESTRICT rect) {
@@ -129,6 +138,38 @@ static float testbed_usage_percent(const uint32_t used, const uint32_t capacity)
     return ((float)used * 100.0f) / (float)capacity;
 }
 
+const char *testbed_bench_camera_state_name(const TestbedBenchCameraState state) {
+    switch (state) {
+    case TESTBED_BENCH_CAMERA_ZOOM_OUT_CENTER:
+        return "zoom_out_center";
+    case TESTBED_BENCH_CAMERA_ZOOM_IN_CENTER:
+        return "zoom_in_center";
+    case TESTBED_BENCH_CAMERA_ZOOM_IN_OFFMAP:
+        return "zoom_in_offmap";
+    default:
+        return "zoom_out_center";
+    }
+}
+
+const char *testbed_bench_diagnostic_mode_name(const TestbedBenchDiagnosticMode mode) {
+    switch (mode) {
+    case TESTBED_BENCH_DIAGNOSTIC_DEFAULT:
+        return "default";
+    case TESTBED_BENCH_DIAGNOSTIC_WORLD_ONLY:
+        return "world-only";
+    case TESTBED_BENCH_DIAGNOSTIC_UI_ONLY:
+        return "ui-only";
+    case TESTBED_BENCH_DIAGNOSTIC_WIRE_ONLY:
+        return "wire-only";
+    case TESTBED_BENCH_DIAGNOSTIC_NO_DRAW:
+        return "no-draw";
+    case TESTBED_BENCH_DIAGNOSTIC_UPLOAD_SUPPRESSED:
+        return "upload-suppressed";
+    default:
+        return "default";
+    }
+}
+
 static void testbed_sync_window_metrics(TestbedGame *game) {
     if (!game || !game->engine) {
         return;
@@ -155,7 +196,98 @@ static void testbed_sync_window_metrics(TestbedGame *game) {
     }
 }
 
-static bool testbed_ensure_building_instance_capacity(TestbedGame *game, const int needed_instances) {
+static void testbed_apply_benchmark_camera_preset(TestbedGame *const game) {
+    if (!game || !game->tilemap || game->camera_id == 0) {
+        return;
+    }
+
+    const int center_x = game->tilemap->width / 2;
+    const int center_y = game->tilemap->height / 2;
+
+    float world_x = 0.0f;
+    float world_y = 0.0f;
+    Tilemap_TileToWorld(game->tilemap, center_x, center_y, &world_x, &world_y);
+
+    float zoom = 1.0f;
+    switch (game->benchmark_camera_state) {
+    case TESTBED_BENCH_CAMERA_ZOOM_OUT_CENTER:
+        zoom = 0.5f;
+        break;
+    case TESTBED_BENCH_CAMERA_ZOOM_IN_CENTER:
+        zoom = 3.0f;
+        break;
+    case TESTBED_BENCH_CAMERA_ZOOM_IN_OFFMAP:
+        zoom = 3.0f;
+        world_x += 5000.0f;
+        world_y -= 5000.0f;
+        break;
+    default:
+        break;
+    }
+
+    game->benchmark_camera_x = world_x;
+    game->benchmark_camera_y = world_y;
+    game->benchmark_camera_zoom = zoom;
+
+    game->camera_x = world_x;
+    game->camera_y = world_y;
+    game->camera_zoom = zoom;
+    miso_camera_set_position(game->engine, game->camera_id, world_x, world_y);
+    miso_camera_set_zoom(game->engine, game->camera_id, zoom);
+}
+
+static bool testbed_should_render_world(const TestbedGame *const game) {
+    if (!game || !game->benchmark_mode) {
+        return true;
+    }
+
+    switch (game->benchmark_diagnostic_mode) {
+    case TESTBED_BENCH_DIAGNOSTIC_UI_ONLY:
+    case TESTBED_BENCH_DIAGNOSTIC_WIRE_ONLY:
+    case TESTBED_BENCH_DIAGNOSTIC_NO_DRAW:
+        return false;
+    default:
+        return true;
+    }
+}
+
+static bool testbed_should_render_ui(const TestbedGame *const game) {
+    if (!game || !game->benchmark_mode) {
+        return true;
+    }
+
+    switch (game->benchmark_diagnostic_mode) {
+    case TESTBED_BENCH_DIAGNOSTIC_WORLD_ONLY:
+    case TESTBED_BENCH_DIAGNOSTIC_WIRE_ONLY:
+    case TESTBED_BENCH_DIAGNOSTIC_NO_DRAW:
+    case TESTBED_BENCH_DIAGNOSTIC_UPLOAD_SUPPRESSED:
+        return false;
+    default:
+        return true;
+    }
+}
+
+static bool testbed_should_render_wire(const TestbedGame *const game) {
+    if (!game) {
+        return false;
+    }
+    if (!game->benchmark_mode) {
+        return game->wireframe_mode;
+    }
+
+    switch (game->benchmark_diagnostic_mode) {
+    case TESTBED_BENCH_DIAGNOSTIC_WIRE_ONLY:
+        return true;
+    case TESTBED_BENCH_DIAGNOSTIC_WORLD_ONLY:
+    case TESTBED_BENCH_DIAGNOSTIC_UI_ONLY:
+    case TESTBED_BENCH_DIAGNOSTIC_NO_DRAW:
+        return false;
+    default:
+        return game->wireframe_mode;
+    }
+}
+
+static bool testbed_ensure_building_instance_capacity(TestbedGame *const game, const int needed_instances) {
     if (!game || needed_instances <= 0) {
         return false;
     }
@@ -231,8 +363,10 @@ static bool testbed_wireframe_push_line(float *line_vertices,
     return true;
 }
 
-static void
-testbed_render_tile_highlight(const TestbedGame *game, const int tile_x, const int tile_y, const SDL_FColor color) {
+static void testbed_render_tile_highlight(const TestbedGame *const game,
+                                          const int tile_x,
+                                          const int tile_y,
+                                          const SDL_FColor color) {
     if (!game->tilemap || tile_x < 0 || tile_y < 0 || tile_x >= game->tilemap->width ||
         tile_y >= game->tilemap->height) {
         return;
@@ -339,8 +473,8 @@ static WireframeMesh testbed_build_wireframe_mesh(const float iso_x,
     const SDL_FPoint dv_width = {half_w, half_h};
 
     for (int i = 1; i <= bl; i++) {
-        SDL_FPoint p0 = {roof_fl.x + dv_len.x * (float)i, roof_fl.y + dv_len.y * (float)i};
-        SDL_FPoint p1 = {roof_fr.x + dv_len.x * (float)i, roof_fr.y + dv_len.y * (float)i};
+        const SDL_FPoint p0 = {roof_fl.x + dv_len.x * (float)i, roof_fl.y + dv_len.y * (float)i};
+        const SDL_FPoint p1 = {roof_fr.x + dv_len.x * (float)i, roof_fr.y + dv_len.y * (float)i};
         if (!testbed_wireframe_push_line(
                 line_vertices, vertex_capacity, &vertex_count, p0.x, p0.y, depth, p1.x, p1.y, depth)) {
             goto fail;
@@ -348,8 +482,8 @@ static WireframeMesh testbed_build_wireframe_mesh(const float iso_x,
     }
 
     for (int j = 0; j < bw; j++) {
-        SDL_FPoint p0 = {roof_fl.x + dv_width.x * (float)j, roof_fl.y + dv_width.y * (float)j};
-        SDL_FPoint p1 = {roof_bl.x + dv_width.x * (float)j, roof_bl.y + dv_width.y * (float)j};
+        const SDL_FPoint p0 = {roof_fl.x + dv_width.x * (float)j, roof_fl.y + dv_width.y * (float)j};
+        const SDL_FPoint p1 = {roof_bl.x + dv_width.x * (float)j, roof_bl.y + dv_width.y * (float)j};
         if (!testbed_wireframe_push_line(
                 line_vertices, vertex_capacity, &vertex_count, p0.x, p0.y, depth, p1.x, p1.y, depth)) {
             goto fail;
@@ -383,7 +517,7 @@ static void testbed_render_buildings(TestbedGame *const game) {
     const float iso_w = (float)tile_w;
     const float iso_h = (float)tile_h / 2.0f;
     const float start_x = (float)(game->tilemap->height - 1) * iso_w / 2.0f;
-    const float start_y = 0.0f;
+    constexpr float start_y = 0.0f;
 
     SpriteInstance *instances = game->building_instances;
     int instance_count = 0;
@@ -432,7 +566,7 @@ static void testbed_render_buildings(TestbedGame *const game) {
     PROF_stop(PROFILER_RENDER_BUILDINGS);
 }
 
-static void testbed_spawn_boat(TestbedGame *game, const int x, const int y) {
+static void testbed_spawn_boat(TestbedGame *const game, const int x, const int y) {
     if (!game->tilemap || game->building_count >= MAX_BUILDINGS) {
         return;
     }
@@ -457,14 +591,14 @@ static void testbed_spawn_boat(TestbedGame *game, const int x, const int y) {
         }
     }
 
-    const float b_h_ = 3.0f;
-    const float b_w_ = 1.0f;
+    constexpr float b_h_ = 3.0f;
+    constexpr float b_w_ = 1.0f;
     const float tile_w = (float)game->tilemap->tileset->tile_width;
     const float tile_h = (float)game->tilemap->tileset->tile_height;
     const float iso_w = tile_w;
     const float iso_h = tile_h * 0.5f;
     const float start_x = (float)(game->tilemap->height - 1) * iso_w * 0.5f;
-    const float start_y = 0.0f;
+    constexpr float start_y = 0.0f;
     const float iso_x = start_x + (float)(x - y) * iso_w * 0.5f - (b_w_ - 1.0f) * iso_w * 0.5f;
     const float iso_y = start_y + (float)(x + y) * iso_h * 0.5f - tile_h - b_h_ * iso_h;
     const float wire_depth = 1.0f - (float)(x + y) / (float)(game->tilemap->width + game->tilemap->height) - 0.0015f;
@@ -474,7 +608,7 @@ static void testbed_spawn_boat(TestbedGame *game, const int x, const int y) {
     game->building_count++;
 }
 
-static void testbed_spawn_boats(TestbedGame *game, const int amount) {
+static void testbed_spawn_boats(TestbedGame *const game, const int amount) {
     if (!game->tilemap) {
         return;
     }
@@ -504,14 +638,14 @@ static void testbed_spawn_boats(TestbedGame *game, const int amount) {
                 game->buildings[game->building_count].width = 1;
                 game->buildings[game->building_count].length = 3;
 
-                const float b_h_ = 3.0f;
-                const float b_w_ = 1.0f;
+                constexpr float b_h_ = 3.0f;
+                constexpr float b_w_ = 1.0f;
                 const float tile_w = (float)game->tilemap->tileset->tile_width;
                 const float tile_h = (float)game->tilemap->tileset->tile_height;
                 const float iso_w = tile_w;
                 const float iso_h = tile_h * 0.5f;
                 const float start_x = (float)(game->tilemap->height - 1) * iso_w * 0.5f;
-                const float start_y = 0.0f;
+                constexpr float start_y = 0.0f;
                 const float iso_x = start_x + (float)(x - y) * iso_w * 0.5f - (b_w_ - 1.0f) * iso_w * 0.5f;
                 const float iso_y = start_y + (float)(x + y) * iso_h * 0.5f - tile_h - b_h_ * iso_h;
                 const float wire_depth =
@@ -526,7 +660,7 @@ static void testbed_spawn_boats(TestbedGame *game, const int amount) {
     }
 }
 
-static void testbed_refresh_hover_tile(TestbedGame *game) {
+static void testbed_refresh_hover_tile(TestbedGame *const game) {
     if (!game->tilemap || game->camera_id == 0) {
         return;
     }
@@ -536,19 +670,21 @@ static void testbed_refresh_hover_tile(TestbedGame *game) {
     game->hover_tile = Tilemap_ScreenToTile(game->tilemap, world_position.x, world_position.y);
 }
 
-static void testbed_game_on_event(void *ctx, const MisoEvent *event) {
-    TestbedGame *game = (TestbedGame *)ctx;
+static void testbed_game_on_event(void *const ctx, const MisoEvent *const event) {
+    TestbedGame *const game = (TestbedGame *)ctx;
     if (!game || !event) {
         return;
     }
 
-    PROF_stop(PROFILER_EVENT_HANDLING);
-    PROF_start(PROFILER_NUKLEAR);
-    const bool consumed = miso_debug_ui_feed_event(event);
-    PROF_stop(PROFILER_NUKLEAR);
-    PROF_start(PROFILER_EVENT_HANDLING);
-    if (consumed) {
-        return;
+    if (!game->benchmark_mode || game->benchmark_debug_ui_enabled) {
+        PROF_stop(PROFILER_EVENT_HANDLING);
+        PROF_start(PROFILER_NUKLEAR);
+        const bool consumed = miso_debug_ui_feed_event(event);
+        PROF_stop(PROFILER_NUKLEAR);
+        PROF_start(PROFILER_EVENT_HANDLING);
+        if (consumed) {
+            return;
+        }
     }
 
     switch (event->type) {
@@ -557,6 +693,12 @@ static void testbed_game_on_event(void *ctx, const MisoEvent *event) {
         break;
 
     case MISO_EVENT_KEY:
+        if (game->benchmark_mode) {
+            if (event->data.key.down && event->data.key.keycode == SDLK_ESCAPE) {
+                game->running = false;
+            }
+            break;
+        }
         if (!event->data.key.down) {
             break;
         }
@@ -622,6 +764,9 @@ static void testbed_game_on_event(void *ctx, const MisoEvent *event) {
         break;
 
     case MISO_EVENT_MOUSE_BUTTON:
+        if (game->benchmark_mode) {
+            break;
+        }
         if (event->data.mouse_button.button == MISO_MOUSE_BUTTON_LEFT && event->data.mouse_button.down) {
             if (game->hover_tile.x >= 0 && game->hover_tile.y >= 0 && game->tilemap &&
                 game->hover_tile.x < game->tilemap->width && game->hover_tile.y < game->tilemap->height &&
@@ -636,6 +781,9 @@ static void testbed_game_on_event(void *ctx, const MisoEvent *event) {
         break;
 
     case MISO_EVENT_MOUSE_MOVE:
+        if (game->benchmark_mode) {
+            break;
+        }
         game->mouse_x = (float)event->data.mouse_move.x * game->pixel_ratio;
         game->mouse_y = (float)event->data.mouse_move.y * game->pixel_ratio;
 
@@ -651,6 +799,9 @@ static void testbed_game_on_event(void *ctx, const MisoEvent *event) {
         break;
 
     case MISO_EVENT_MOUSE_WHEEL:
+        if (game->benchmark_mode) {
+            break;
+        }
         if (event->data.mouse_wheel.y != 0.0f) {
             miso_camera_zoom_at_screen(
                 game->engine, game->camera_id, event->data.mouse_wheel.y, game->mouse_x, game->mouse_y);
@@ -670,12 +821,12 @@ static void testbed_game_on_event(void *ctx, const MisoEvent *event) {
     }
 }
 
-static void testbed_game_on_sim_tick(void *ctx, float fixed_dt_seconds) {
+static void testbed_game_on_sim_tick(void *const ctx, const float fixed_dt_seconds) {
     (void)ctx;
     (void)fixed_dt_seconds;
 }
 
-static void testbed_render_hud_line(TestbedGame *game, float x, float y, const char *text) {
+static void testbed_render_hud_line(TestbedGame *game, const float x, const float y, const char *const text) {
     if (!game || !text ||
         !testbed_is_point_in_rect(x, y, &(SDL_FRect){0, 0, (float)game->screen_width, (float)game->screen_height})) {
         return;
@@ -691,8 +842,8 @@ static void testbed_render_hud_line(TestbedGame *game, float x, float y, const c
     miso_render_submit_ui_text(game->engine, game->hud_font, text, x + pad_x, y + pad_y, 0xFFFFFFFFu);
 }
 
-static void testbed_game_on_render_world(void *ctx, MisoEngine *engine) {
-    TestbedGame *game = (TestbedGame *)ctx;
+static void testbed_game_on_render_world(void *const ctx, const MisoEngine *const engine) {
+    TestbedGame *const game = (TestbedGame *)ctx;
     if (!game || !game->tilemap) {
         return;
     }
@@ -701,17 +852,20 @@ static void testbed_game_on_render_world(void *ctx, MisoEngine *engine) {
     miso_render_set_water_params(
         engine, game->game_clock.total, game->wave_speed, game->wave_amplitude, game->wave_phase);
 
-    PROF_start(PROFILER_RENDER_MAP);
-    Tilemap_Render(game->tilemap);
-    PROF_stop(PROFILER_RENDER_MAP);
+    if (testbed_should_render_world(game)) {
+        PROF_start(PROFILER_RENDER_MAP);
+        Tilemap_Render(game->tilemap);
+        PROF_stop(PROFILER_RENDER_MAP);
 
-    testbed_render_buildings(game);
-    testbed_render_tile_highlight(game, game->hover_tile.x, game->hover_tile.y, (SDL_FColor){0.0f, 1.0f, 1.0f, 1.0f});
+        testbed_render_buildings(game);
+        testbed_render_tile_highlight(
+            game, game->hover_tile.x, game->hover_tile.y, (SDL_FColor){0.0f, 1.0f, 1.0f, 1.0f});
 
-    Renderer_DrawTextureDebug(
-        game->tilemap->tileset->texture, 50.0f, (float)game->screen_height - 384.0f - 50.0f, 192.0f, 384.0f);
+        Renderer_DrawTextureDebug(
+            game->tilemap->tileset->texture, 50.0f, (float)game->screen_height - 384.0f - 50.0f, 192.0f, 384.0f);
+    }
 
-    if (game->wireframe_mode) {
+    if (testbed_should_render_wire(game)) {
         PROF_start(PROFILER_RENDER_WIREFRAMES);
         size_t total_vertex_count = 0;
         for (int i = 0; i < game->building_count; i++) {
@@ -743,9 +897,9 @@ static void testbed_game_on_render_world(void *ctx, MisoEngine *engine) {
     miso_render_end_world(engine);
 }
 
-static void testbed_game_on_render_ui(void *ctx, MisoEngine *const engine) {
-    TestbedGame *game = (TestbedGame *)ctx;
-    if (!game) {
+static void testbed_game_on_render_ui(void *const ctx, const MisoEngine *const engine) {
+    TestbedGame *const game = (TestbedGame *)ctx;
+    if (!game || !testbed_should_render_ui(game)) {
         return;
     }
 
@@ -783,7 +937,7 @@ static void testbed_game_on_render_ui(void *ctx, MisoEngine *const engine) {
     testbed_render_hud_line(game, 10.0f, ui_y_pos, fps_str);
     ui_y_pos += 34.0f;
 
-    if (game->debug_mode) {
+    if (game->debug_mode && (!game->benchmark_mode || game->benchmark_profiler_enabled)) {
         PROF_render((SDL_FPoint){10.0f, ui_y_pos});
     }
 
@@ -795,9 +949,9 @@ static void testbed_game_on_render_ui(void *ctx, MisoEngine *const engine) {
     PROF_stop(PROFILER_RENDER_UI);
 }
 
-static void testbed_game_on_render_debug(void *ctx, MisoEngine *const engine) {
-    TestbedGame *game = (TestbedGame *)ctx;
-    if (!game) {
+static void testbed_game_on_render_debug(void *const ctx, const MisoEngine *const engine) {
+    TestbedGame *const game = (TestbedGame *)ctx;
+    if (!game || (game->benchmark_mode && !game->benchmark_debug_ui_enabled)) {
         return;
     }
 
@@ -862,8 +1016,30 @@ static void testbed_game_on_render_debug(void *ctx, MisoEngine *const engine) {
             testbed_nk_labelf(
                 nk, NK_TEXT_LEFT, "Present mode: %s", testbed_present_mode_name(Renderer_GetPresentMode()));
             testbed_nk_labelf(nk, NK_TEXT_LEFT, "Pixel density: %.2f", game->pixel_ratio);
-            testbed_nk_labelf(nk, NK_TEXT_LEFT, "Acquire swapchain: %.3f ms", stats.timing.swapchain_acquire_ms);
+            testbed_nk_labelf(nk, NK_TEXT_LEFT, "Frame CPU: %.3f ms", stats.timing.frame_cpu_ms);
+            testbed_nk_labelf(nk, NK_TEXT_LEFT, "Acquire swapchain: %.3f ms", stats.timing.acquire_swapchain_ms);
+            testbed_nk_labelf(nk, NK_TEXT_LEFT, "Record commands: %.3f ms", stats.timing.record_commands_ms);
             testbed_nk_labelf(nk, NK_TEXT_LEFT, "Submit cmd buffer: %.3f ms", stats.timing.submit_ms);
+            testbed_nk_labelf(nk,
+                              NK_TEXT_LEFT,
+                              "Draw calls world/ui/line: %u / %u / %u",
+                              stats.draw_calls_world,
+                              stats.draw_calls_ui,
+                              stats.draw_calls_lines);
+            testbed_nk_labelf(nk,
+                              NK_TEXT_LEFT,
+                              "Uploads total: %.2f MiB (sprite %.2f | world %.2f | line %.2f | ui %.2f | text %.2f)",
+                              testbed_bytes_to_mib(stats.uploaded_bytes_total),
+                              testbed_bytes_to_mib(stats.uploaded_bytes_sprite),
+                              testbed_bytes_to_mib(stats.uploaded_bytes_world_geo),
+                              testbed_bytes_to_mib(stats.uploaded_bytes_line),
+                              testbed_bytes_to_mib(stats.uploaded_bytes_ui_geo),
+                              testbed_bytes_to_mib(stats.uploaded_bytes_ui_text));
+            testbed_nk_labelf(nk,
+                              NK_TEXT_LEFT,
+                              "Submitted instances/line verts: %u / %u",
+                              stats.instances_submitted,
+                              stats.line_vertices_submitted);
             testbed_nk_labelf(nk,
                               NK_TEXT_LEFT,
                               "Sprite stream: %.2f / %.2f MiB (%.1f%%) peak %.2f MiB",
@@ -912,6 +1088,15 @@ static void testbed_game_on_render_debug(void *ctx, MisoEngine *const engine) {
                               testbed_usage_percent(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].used_bytes,
                                                     streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].capacity_bytes),
                               testbed_bytes_to_mib(streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].peak_bytes));
+            testbed_nk_labelf(nk,
+                              NK_TEXT_LEFT,
+                              "Overflow sprite/world/line/ui/ui_text_v/ui_text_i: %u/%u/%u/%u/%u/%u",
+                              streams[MISO_RENDER_STATS_STREAM_SPRITE].overflow_count,
+                              streams[MISO_RENDER_STATS_STREAM_WORLD_GEOMETRY].overflow_count,
+                              streams[MISO_RENDER_STATS_STREAM_LINE].overflow_count,
+                              streams[MISO_RENDER_STATS_STREAM_UI_GEOMETRY].overflow_count,
+                              streams[MISO_RENDER_STATS_STREAM_UI_TEXT_VERT].overflow_count,
+                              streams[MISO_RENDER_STATS_STREAM_UI_TEXT_INDEX].overflow_count);
         }
     }
     nk_end(nk);
@@ -919,8 +1104,9 @@ static void testbed_game_on_render_debug(void *ctx, MisoEngine *const engine) {
     PROF_stop(PROFILER_NUKLEAR);
 }
 
-static MisoResult
-testbed_game_on_save(void *const game_ctx, MisoByteBuffer *const out_payload, uint32_t *const out_payload_version) {
+static MisoResult testbed_game_on_save(const void *const game_ctx,
+                                       MisoByteBuffer *const out_payload,
+                                       uint32_t *const out_payload_version) {
     (void)game_ctx;
     (void)out_payload;
     (void)out_payload_version;
@@ -942,13 +1128,13 @@ static void testbed_game_on_reset(void *const game_ctx) {
     (void)game_ctx;
 }
 
-static uint64_t testbed_game_state_hash(void *const game_ctx) {
-    const TestbedGame *game = (const TestbedGame *)game_ctx;
+static uint64_t testbed_game_state_hash(const void *const game_ctx) {
+    const TestbedGame *const game = (const TestbedGame *)game_ctx;
     if (!game) {
         return 0;
     }
     uint64_t hash = 1469598103934665603ULL;
-    const uint8_t *bytes = (const uint8_t *)game;
+    const uint8_t *const bytes = (const uint8_t *)game;
     for (size_t i = 0; i < sizeof(*game); i++) {
         hash ^= (uint64_t)bytes[i];
         hash *= 1099511628211ULL;
@@ -985,6 +1171,37 @@ static void testbed_populate_demo_map(const TestbedGame *const game) {
     }
 }
 
+static void testbed_clear_buildings(TestbedGame *const game) {
+    if (!game) {
+        return;
+    }
+
+    for (int i = 0; i < game->building_count; i++) {
+        SDL_free(game->wireframe_meshes[i].line_vertices);
+        game->wireframe_meshes[i].line_vertices = nullptr;
+        game->wireframe_meshes[i].vertex_count = 0;
+    }
+    game->building_count = 0;
+}
+
+static void testbed_reset_demo_scene(TestbedGame *const game, const int spawn_count) {
+    if (!game || !game->tilemap) {
+        return;
+    }
+
+    testbed_clear_buildings(game);
+
+    const size_t tile_count = (size_t)game->tilemap->width * (size_t)game->tilemap->height;
+    SDL_memset(game->tilemap->occupied, false, tile_count * sizeof(bool));
+    SDL_memset(game->tilemap->flags, 0, tile_count * sizeof(uint8_t));
+    testbed_populate_demo_map(game);
+
+    game->hover_tile = (SDL_Point){-1, -1};
+    if (spawn_count > 0) {
+        testbed_spawn_boats(game, spawn_count);
+    }
+}
+
 MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
     if (!engine || !out_game) {
         return MISO_ERR_INVALID_ARG;
@@ -1006,6 +1223,11 @@ MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
     game->wave_speed = 0.2f;
     game->wave_amplitude = 0.5f;
     game->wave_phase = 0.1f;
+    game->benchmark_mode = false;
+    game->benchmark_debug_ui_enabled = true;
+    game->benchmark_profiler_enabled = true;
+    game->benchmark_diagnostic_mode = TESTBED_BENCH_DIAGNOSTIC_DEFAULT;
+    game->benchmark_camera_state = TESTBED_BENCH_CAMERA_ZOOM_IN_CENTER;
 
     if (!testbed_ensure_building_instance_capacity(game, MAX_BUILDINGS + 1)) {
         SDL_free(game);
@@ -1023,12 +1245,15 @@ MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
     game->camera_zoom = 2.0f;
     miso_camera_set_position(engine, game->camera_id, game->camera_x, game->camera_y);
     miso_camera_set_zoom(engine, game->camera_id, game->camera_zoom);
+    game->benchmark_camera_x = game->camera_x;
+    game->benchmark_camera_y = game->camera_y;
+    game->benchmark_camera_zoom = game->camera_zoom;
 
     if (miso_debug_ui_init(engine, "/Users/arnau/Library/Fonts/JetBrainsMono-Regular.ttf", 14.0f) != MISO_OK) {
         SDL_Log("Warning: failed to init debug UI");
     }
 
-    MisoResult font_result =
+    const MisoResult font_result =
         miso_render_load_font(engine, "/Users/arnau/Library/Fonts/JetBrainsMono-Regular.ttf", 24.0f, &game->hud_font);
     if (font_result != MISO_OK) {
         miso_debug_ui_shutdown();
@@ -1072,18 +1297,20 @@ void testbed_game_destroy(TestbedGame *game) {
         return;
     }
 
+    Renderer_SetUploadSuppressed(false);
+
     for (int i = 0; i < game->building_count; i++) {
         SDL_free(game->wireframe_meshes[i].line_vertices);
-        game->wireframe_meshes[i].line_vertices = NULL;
+        game->wireframe_meshes[i].line_vertices = nullptr;
         game->wireframe_meshes[i].vertex_count = 0;
     }
 
     SDL_free(game->wireframe_line_scratch);
-    game->wireframe_line_scratch = NULL;
+    game->wireframe_line_scratch = nullptr;
     game->wireframe_line_scratch_capacity_vertices = 0U;
 
     SDL_free(game->building_instances);
-    game->building_instances = NULL;
+    game->building_instances = nullptr;
     game->building_instances_capacity = 0;
 
     if (game->tilemap) {
@@ -1110,33 +1337,110 @@ void testbed_game_frame_begin(TestbedGame *game, const float real_dt_seconds) {
 
     testbed_sync_window_metrics(game);
 
+    if (game->benchmark_mode) {
+        miso_camera_set_position(game->engine, game->camera_id, game->benchmark_camera_x, game->benchmark_camera_y);
+        miso_camera_set_zoom(game->engine, game->camera_id, game->benchmark_camera_zoom);
+        game->camera_x = game->benchmark_camera_x;
+        game->camera_y = game->benchmark_camera_y;
+        game->camera_zoom = game->benchmark_camera_zoom;
+    }
+
     game->frame_dt = real_dt_seconds;
     GameClock_update(&game->game_clock, real_dt_seconds);
     PROF_frameStart();
     PROF_start(PROFILER_EVENT_HANDLING);
-    miso_debug_ui_begin_input();
+    if (!game->benchmark_mode || game->benchmark_debug_ui_enabled) {
+        miso_debug_ui_begin_input();
+    }
 }
 
 void testbed_game_frame_end_events(TestbedGame *game) {
     if (!game) {
         return;
     }
-    miso_debug_ui_end_input();
+    if (!game->benchmark_mode || game->benchmark_debug_ui_enabled) {
+        miso_debug_ui_end_input();
+    }
     PROF_stop(PROFILER_EVENT_HANDLING);
 }
 
-void testbed_game_frame_end(TestbedGame *game) {
+void testbed_game_frame_end(const TestbedGame *const game) {
     if (game && game->engine) {
         MisoRenderFrameStats stats = {0};
         if (miso_render_get_frame_stats(game->engine, &stats)) {
-            PROF_setDuration(PROFILER_WAIT_FRAME, stats.timing.swapchain_acquire_ms);
+            PROF_setDuration(PROFILER_WAIT_FRAME, stats.timing.acquire_swapchain_ms);
             PROF_setDuration(PROFILER_GPU, stats.timing.submit_ms);
         }
     }
     PROF_frameEnd();
 }
 
-bool testbed_game_is_running(const TestbedGame *game) {
+void testbed_game_enable_benchmark_mode(TestbedGame *const game, const bool enabled) {
+    if (!game) {
+        return;
+    }
+    game->benchmark_mode = enabled;
+    if (!enabled) {
+        game->benchmark_diagnostic_mode = TESTBED_BENCH_DIAGNOSTIC_DEFAULT;
+        game->benchmark_debug_ui_enabled = true;
+        game->benchmark_profiler_enabled = true;
+        Renderer_SetUploadSuppressed(false);
+    }
+}
+
+void testbed_game_set_benchmark_debug_ui(TestbedGame *const game, const bool enabled) {
+    if (!game) {
+        return;
+    }
+    game->benchmark_debug_ui_enabled = enabled;
+}
+
+void testbed_game_set_benchmark_profiler(TestbedGame *const game, const bool enabled) {
+    if (!game) {
+        return;
+    }
+    game->benchmark_profiler_enabled = enabled;
+    game->debug_mode = enabled;
+}
+
+void testbed_game_set_benchmark_wireframe(TestbedGame *const game, const bool enabled) {
+    if (!game) {
+        return;
+    }
+    game->wireframe_mode = enabled;
+}
+
+void testbed_game_set_benchmark_diagnostic_mode(TestbedGame *const game, const TestbedBenchDiagnosticMode mode) {
+    if (!game) {
+        return;
+    }
+    game->benchmark_diagnostic_mode = mode;
+}
+
+void testbed_game_set_benchmark_camera_state(TestbedGame *const game, const TestbedBenchCameraState camera_state) {
+    if (!game) {
+        return;
+    }
+    game->benchmark_camera_state = camera_state;
+    testbed_apply_benchmark_camera_preset(game);
+}
+
+void testbed_game_set_benchmark_upload_suppressed(TestbedGame *const game, const bool enabled) {
+    if (!game) {
+        return;
+    }
+    Renderer_SetUploadSuppressed(enabled);
+}
+
+void testbed_game_reset_benchmark_scene(TestbedGame *const game, const int spawn_count) {
+    if (!game) {
+        return;
+    }
+    testbed_reset_demo_scene(game, spawn_count);
+    testbed_apply_benchmark_camera_preset(game);
+}
+
+bool testbed_game_is_running(const TestbedGame *const game) {
     return game && game->running;
 }
 

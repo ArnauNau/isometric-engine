@@ -11,3 +11,4 @@ assets/
 # Keep minimal runtime sample assets in repo; ignore source art content.
 *.aseprite
 art-src/
+bench/
