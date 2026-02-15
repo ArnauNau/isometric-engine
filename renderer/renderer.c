@@ -27,6 +27,7 @@ static SDL_GPUCommandBuffer *cmd_buffer = nullptr;
 static SDL_GPUTexture *swapchain_texture = nullptr;
 static SDL_GPUTexture *depth_texture = nullptr;
 static SDL_GPUPresentMode g_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
+static bool g_upload_suppressed = false;
 
 #define RENDERER_FRAMES_IN_FLIGHT 3U
 #define RENDERER_STREAM_ALIGN 16U
@@ -59,6 +60,7 @@ typedef struct {
     Uint32 slot_base;
     Uint32 write_offset;
     Uint32 peak_used_bytes;
+    Uint32 overflow_count;
 } RendererUploadStream;
 
 typedef struct {
@@ -124,6 +126,9 @@ static Uint32 current_frame_slot = 0;
 static bool frame_queues_flushed = false;
 
 static RendererFrameStats g_frame_stats = {0};
+static Uint64 g_frame_cpu_start_ticks = 0;
+static Uint64 g_record_commands_start_ticks = 0;
+static bool g_frame_active = false;
 
 static float g_screen_projection[16] = {0};
 
@@ -229,6 +234,7 @@ renderer_stream_init(RendererUploadStream *const stream, const SDL_GPUBufferUsag
     stream->slot_base = 0;
     stream->write_offset = 0;
     stream->peak_used_bytes = 0;
+    stream->overflow_count = 0;
     return true;
 }
 
@@ -250,6 +256,8 @@ static void renderer_stream_shutdown(RendererUploadStream *const stream) {
 static bool renderer_stream_begin_frame(RendererUploadStream *const stream, const Uint32 frame_slot) {
     stream->slot_base = frame_slot * stream->slot_size;
     stream->write_offset = stream->slot_base;
+    stream->peak_used_bytes = 0;
+    stream->overflow_count = 0;
     stream->mapped = (uint8_t *)SDL_MapGPUTransferBuffer(gpu_device, stream->transfer, true);
     if (!stream->mapped) {
         SDL_LogError(SDL_LOG_CATEGORY_GPU, "Failed to map transfer stream: %s", SDL_GetError());
@@ -276,6 +284,7 @@ static bool renderer_stream_alloc(RendererUploadStream *const stream,
     const Uint32 aligned = renderer_align_up(stream->write_offset, alignment);
     const Uint32 end_offset = aligned + size;
     if (end_offset > (stream->slot_base + stream->slot_size)) {
+        stream->overflow_count++;
         SDL_LogWarn(
             SDL_LOG_CATEGORY_RENDER, "Upload stream exhausted (slot_size=%u, requested=%u)", stream->slot_size, size);
         return false;
@@ -301,12 +310,17 @@ static bool renderer_stream_write(RendererUploadStream *const restrict stream,
     if (!renderer_stream_alloc(stream, size, alignment, out_offset)) {
         return false;
     }
-    SDL_memcpy(stream->mapped + *out_offset, src, size);
+    if (!g_upload_suppressed) {
+        SDL_memcpy(stream->mapped + *out_offset, src, size);
+    }
     return true;
 }
 
 static bool renderer_stream_upload_used(SDL_GPUCopyPass *const copy_pass, const RendererUploadStream *const stream) {
     if (!stream || stream->write_offset <= stream->slot_base) {
+        return true;
+    }
+    if (g_upload_suppressed) {
         return true;
     }
 
@@ -338,6 +352,8 @@ static void renderer_record_stream_stat(const RendererStatsStreamKind stream_kin
     stream_stats->used_bytes = renderer_stream_used_bytes(stream);
     stream_stats->peak_bytes = stream->peak_used_bytes;
     stream_stats->capacity_bytes = stream->slot_size;
+    stream_stats->uploaded_bytes = g_upload_suppressed ? 0U : stream_stats->used_bytes;
+    stream_stats->overflow_count = stream->overflow_count;
 }
 
 static void renderer_record_stream_stats(void) {
@@ -347,6 +363,16 @@ static void renderer_record_stream_stats(void) {
     renderer_record_stream_stat(RENDERER_STATS_STREAM_UI_GEOMETRY, &ui_geom_stream);
     renderer_record_stream_stat(RENDERER_STATS_STREAM_UI_TEXT_VERT, &ui_text_vert_stream);
     renderer_record_stream_stat(RENDERER_STATS_STREAM_UI_TEXT_INDEX, &ui_text_index_stream);
+
+    g_frame_stats.uploaded_bytes_sprite = g_frame_stats.streams[RENDERER_STATS_STREAM_SPRITE].uploaded_bytes;
+    g_frame_stats.uploaded_bytes_world_geo = g_frame_stats.streams[RENDERER_STATS_STREAM_WORLD_GEOMETRY].uploaded_bytes;
+    g_frame_stats.uploaded_bytes_line = g_frame_stats.streams[RENDERER_STATS_STREAM_LINE].uploaded_bytes;
+    g_frame_stats.uploaded_bytes_ui_geo = g_frame_stats.streams[RENDERER_STATS_STREAM_UI_GEOMETRY].uploaded_bytes;
+    g_frame_stats.uploaded_bytes_ui_text = g_frame_stats.streams[RENDERER_STATS_STREAM_UI_TEXT_VERT].uploaded_bytes +
+                                           g_frame_stats.streams[RENDERER_STATS_STREAM_UI_TEXT_INDEX].uploaded_bytes;
+    g_frame_stats.uploaded_bytes_total = g_frame_stats.uploaded_bytes_sprite + g_frame_stats.uploaded_bytes_world_geo +
+                                         g_frame_stats.uploaded_bytes_line + g_frame_stats.uploaded_bytes_ui_geo +
+                                         g_frame_stats.uploaded_bytes_ui_text;
 }
 
 static void renderer_reset_queues(void) {
@@ -371,6 +397,7 @@ static float renderer_elapsed_ms(const Uint64 start, const Uint64 end) {
 
 static void renderer_count_pass_begin(void) {
     g_frame_stats.passes.begin_calls++;
+    g_frame_stats.render_pass_count++;
 }
 
 static void renderer_count_pass_end(void) {
@@ -420,6 +447,7 @@ static void renderer_draw_world_pass(SDL_GPUCommandBuffer *const cmd) {
         SDL_DrawGPUPrimitives(pass, 6, cmdi->instance_count, 0, cmdi->first_instance);
 
         g_frame_stats.queues[RENDERER_STATS_QUEUE_SPRITE].draw_calls++;
+        g_frame_stats.draw_calls_world++;
     }
 
     for (Uint32 i = 0; i < world_geom_cmd_count; i++) {
@@ -435,6 +463,7 @@ static void renderer_draw_world_pass(SDL_GPUCommandBuffer *const cmd) {
         SDL_DrawGPUPrimitives(pass, cmdi->vertex_count, 1, 0, 0);
 
         g_frame_stats.queues[RENDERER_STATS_QUEUE_WORLD_GEOMETRY].draw_calls++;
+        g_frame_stats.draw_calls_world++;
     }
 
     for (Uint32 i = 0; i < line_cmd_count; i++) {
@@ -451,6 +480,7 @@ static void renderer_draw_world_pass(SDL_GPUCommandBuffer *const cmd) {
         SDL_DrawGPUPrimitives(pass, cmdi->vertex_count, 1, 0, 0);
 
         g_frame_stats.queues[RENDERER_STATS_QUEUE_LINE].draw_calls++;
+        g_frame_stats.draw_calls_lines++;
     }
 
     SDL_EndGPURenderPass(pass);
@@ -481,6 +511,7 @@ static void renderer_draw_ui_pass(SDL_GPUCommandBuffer *cmd) {
         SDL_DrawGPUPrimitives(pass, cmdi->vertex_count, 1, 0, 0);
 
         g_frame_stats.queues[RENDERER_STATS_QUEUE_UI_GEOMETRY].draw_calls++;
+        g_frame_stats.draw_calls_ui++;
     }
 
     for (Uint32 i = 0; i < ui_text_cmd_count; i++) {
@@ -512,6 +543,7 @@ static void renderer_draw_ui_pass(SDL_GPUCommandBuffer *cmd) {
             SDL_DrawGPUIndexedPrimitives(pass, range->index_count, 1, range->start_index, 0, 0);
 
             g_frame_stats.queues[RENDERER_STATS_QUEUE_UI_TEXT].draw_calls++;
+            g_frame_stats.draw_calls_ui++;
         }
     }
 
@@ -583,7 +615,7 @@ bool Renderer_Init(SDL_Window *const window) {
 
     if (!SDL_SetGPUSwapchainParameters(
             gpu_device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_MAILBOX)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_GPU, "MAILBOX unavailable, falling back to VSYNC");
+        SDL_LogWarn(SDL_LOG_CATEGORY_GPU, "Present mode MAILBOX unavailable, falling back to VSYNC");
         if (!SDL_SetGPUSwapchainParameters(
                 gpu_device, window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC)) {
             SDL_LogError(SDL_LOG_CATEGORY_GPU, "Failed to set swapchain parameters: %s", SDL_GetError());
@@ -972,11 +1004,13 @@ void Renderer_SetPresentMode(const SDL_GPUPresentMode mode) {
     SDL_WaitForGPUIdle(gpu_device);
 
     if (!SDL_SetGPUSwapchainParameters(gpu_device, render_window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode)) {
-        SDL_LogWarn(SDL_LOG_CATEGORY_GPU, "Failed to set present mode: %s", SDL_GetError());
         if (mode == SDL_GPU_PRESENTMODE_MAILBOX) {
+            SDL_LogWarn(SDL_LOG_CATEGORY_GPU, "Failed to set present mode (MAILBOX): %s. Falling back to VSYNC", SDL_GetError());
             if (SDL_SetGPUSwapchainParameters(
                     gpu_device, render_window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC)) {
                 g_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
+            } else {
+                SDL_LogError(SDL_LOG_CATEGORY_GPU, "Failed to set present mode (VSYNC): %s.", SDL_GetError());
             }
         }
     } else {
@@ -992,6 +1026,14 @@ void Renderer_SetVSync(const bool enabled) {
 
 SDL_GPUPresentMode Renderer_GetPresentMode(void) {
     return g_present_mode;
+}
+
+void Renderer_SetUploadSuppressed(const bool enabled) {
+    g_upload_suppressed = enabled;
+}
+
+bool Renderer_GetUploadSuppressed(void) {
+    return g_upload_suppressed;
 }
 
 SDL_GPUTexture *Renderer_LoadTexture(const char *const path) {
@@ -1025,10 +1067,17 @@ SDL_GPUTexture *Renderer_LoadTexture(const char *const path) {
     }
 
     const Uint32 upload_size = (Uint32)(converted->w * converted->h * 4);
+    if (g_frame_active) {
+        g_frame_stats.texture_upload_count++;
+        g_frame_stats.texture_upload_bytes += upload_size;
+    }
     const SDL_GPUTransferBufferCreateInfo transfer_info = {
         .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
         .size = upload_size,
     };
+    if (g_frame_active) {
+        g_frame_stats.transient_buffer_creations++;
+    }
     SDL_GPUTransferBuffer *const transfer_buffer = SDL_CreateGPUTransferBuffer(gpu_device, &transfer_info);
     if (!transfer_buffer) {
         SDL_DestroySurface(converted);
@@ -1037,7 +1086,7 @@ SDL_GPUTexture *Renderer_LoadTexture(const char *const path) {
         return nullptr;
     }
 
-    const Uint8 *const map = (Uint8 *)SDL_MapGPUTransferBuffer(gpu_device, transfer_buffer, true);
+    Uint8 *const map = (Uint8 *)SDL_MapGPUTransferBuffer(gpu_device, transfer_buffer, true);
     for (int y = 0; y < converted->h; y++) {
         const Uint8 *const src = (const Uint8 *)converted->pixels + converted->pitch * y;
         Uint8 *const dst = map + (Uint32)(y * converted->w * 4);
@@ -1081,9 +1130,13 @@ void Renderer_BeginFrame(void) {
     renderer_reset_queues();
     renderer_reset_frame_stats();
     frame_queues_flushed = false;
+    g_frame_active = true;
+    g_frame_cpu_start_ticks = SDL_GetPerformanceCounter();
+    g_record_commands_start_ticks = 0;
 
     cmd_buffer = SDL_AcquireGPUCommandBuffer(gpu_device);
     if (!cmd_buffer) {
+        g_frame_active = false;
         return;
     }
 
@@ -1091,18 +1144,22 @@ void Renderer_BeginFrame(void) {
     const bool got_swapchain =
         SDL_AcquireGPUSwapchainTexture(cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr);
     const Uint64 acquire_end = SDL_GetPerformanceCounter();
-    g_frame_stats.timing.swapchain_acquire_ms = renderer_elapsed_ms(acquire_start, acquire_end);
+    g_frame_stats.timing.acquire_swapchain_ms = renderer_elapsed_ms(acquire_start, acquire_end);
 
     if (!got_swapchain) {
         SDL_SubmitGPUCommandBuffer(cmd_buffer);
         cmd_buffer = nullptr;
         swapchain_texture = nullptr;
+        g_frame_stats.timing.frame_cpu_ms = renderer_elapsed_ms(g_frame_cpu_start_ticks, SDL_GetPerformanceCounter());
+        g_frame_active = false;
         return;
     }
 
     if (!swapchain_texture) {
         SDL_SubmitGPUCommandBuffer(cmd_buffer);
         cmd_buffer = nullptr;
+        g_frame_stats.timing.frame_cpu_ms = renderer_elapsed_ms(g_frame_cpu_start_ticks, SDL_GetPerformanceCounter());
+        g_frame_active = false;
         return;
     }
 
@@ -1123,22 +1180,34 @@ void Renderer_BeginFrame(void) {
         SDL_SubmitGPUCommandBuffer(cmd_buffer);
         cmd_buffer = nullptr;
         swapchain_texture = nullptr;
+        g_frame_stats.timing.frame_cpu_ms = renderer_elapsed_ms(g_frame_cpu_start_ticks, SDL_GetPerformanceCounter());
+        g_frame_active = false;
+        return;
     }
+
+    g_record_commands_start_ticks = SDL_GetPerformanceCounter();
 }
 
 void Renderer_EndFrame(void) {
     if (!cmd_buffer) {
+        g_frame_active = false;
         return;
     }
 
     renderer_flush_queued_draws();
+    if (g_record_commands_start_ticks != 0) {
+        g_frame_stats.timing.record_commands_ms =
+            renderer_elapsed_ms(g_record_commands_start_ticks, SDL_GetPerformanceCounter());
+    }
 
     const Uint64 submit_start = SDL_GetPerformanceCounter();
     SDL_SubmitGPUCommandBuffer(cmd_buffer);
     const Uint64 submit_end = SDL_GetPerformanceCounter();
     g_frame_stats.timing.submit_ms = renderer_elapsed_ms(submit_start, submit_end);
+    g_frame_stats.timing.frame_cpu_ms = renderer_elapsed_ms(g_frame_cpu_start_ticks, submit_end);
     cmd_buffer = nullptr;
     swapchain_texture = nullptr;
+    g_frame_active = false;
 }
 
 void Renderer_SetViewProjection(const float *const viewProjMatrix) {
@@ -1195,6 +1264,7 @@ void Renderer_DrawSprites(SDL_GPUTexture *const texture, const SpriteInstance *c
     }
 
     g_frame_stats.queues[RENDERER_STATS_QUEUE_SPRITE].cmd_count = sprite_cmd_count;
+    g_frame_stats.instances_submitted += (Uint32)count;
 }
 
 void Renderer_DrawLine(const float x1,
@@ -1227,6 +1297,7 @@ void Renderer_DrawLineBatch(const float *const vertices_xyz, const int vertex_co
     SDL_memcpy(cmd->matrix, sprite_uniforms.viewProjection, sizeof(float) * 16U);
 
     g_frame_stats.queues[RENDERER_STATS_QUEUE_LINE].cmd_count = line_cmd_count;
+    g_frame_stats.line_vertices_submitted += (Uint32)vertex_count;
 }
 
 void Renderer_DrawGeometry(const SDL_Vertex *const vertices, const int count) {

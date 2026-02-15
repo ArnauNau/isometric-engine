@@ -58,7 +58,9 @@ typedef struct RendererPassStats {
 } RendererPassStats;
 
 typedef struct RendererTimingStats {
-    float swapchain_acquire_ms;
+    float frame_cpu_ms;
+    float acquire_swapchain_ms;
+    float record_commands_ms;
     float submit_ms;
 } RendererTimingStats;
 
@@ -66,12 +68,29 @@ typedef struct RendererStreamStats {
     Uint32 used_bytes;
     Uint32 peak_bytes;
     Uint32 capacity_bytes;
+    Uint32 uploaded_bytes;
+    Uint32 overflow_count;
 } RendererStreamStats;
 
 typedef struct RendererFrameStats {
     RendererQueueStats queues[RENDERER_STATS_QUEUE_COUNT];
     RendererPassStats passes;
     RendererTimingStats timing;
+    Uint32 render_pass_count;
+    Uint32 draw_calls_world;
+    Uint32 draw_calls_ui;
+    Uint32 draw_calls_lines;
+    Uint32 uploaded_bytes_sprite;
+    Uint32 uploaded_bytes_world_geo;
+    Uint32 uploaded_bytes_ui_geo;
+    Uint32 uploaded_bytes_ui_text;
+    Uint32 uploaded_bytes_line;
+    Uint32 uploaded_bytes_total;
+    Uint32 instances_submitted;
+    Uint32 line_vertices_submitted;
+    Uint32 texture_upload_count;
+    Uint32 texture_upload_bytes;
+    Uint32 transient_buffer_creations;
     RendererStreamStats streams[RENDERER_STATS_STREAM_COUNT];
 } RendererFrameStats;
 
@@ -180,6 +199,8 @@ void Renderer_DrawFilledQuadDebug(float x, float y, float width, float height, S
 
 void Renderer_SetPresentMode(SDL_GPUPresentMode mode);
 SDL_GPUPresentMode Renderer_GetPresentMode(void);
+void Renderer_SetUploadSuppressed(bool enabled);
+bool Renderer_GetUploadSuppressed(void);
 const RendererFrameStats *Renderer_GetFrameStats(void);
 
 #endif // RENDERER_H

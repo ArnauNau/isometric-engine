@@ -41,7 +41,9 @@ typedef struct MisoRenderPassStats {
 } MisoRenderPassStats;
 
 typedef struct MisoRenderTimingStats {
-    float swapchain_acquire_ms;
+    float frame_cpu_ms;
+    float acquire_swapchain_ms;
+    float record_commands_ms;
     float submit_ms;
 } MisoRenderTimingStats;
 
@@ -49,12 +51,29 @@ typedef struct MisoRenderStreamStats {
     uint32_t used_bytes;
     uint32_t peak_bytes;
     uint32_t capacity_bytes;
+    uint32_t uploaded_bytes;
+    uint32_t overflow_count;
 } MisoRenderStreamStats;
 
 typedef struct MisoRenderFrameStats {
     MisoRenderQueueStats queues[MISO_RENDER_STATS_QUEUE_COUNT];
     MisoRenderPassStats passes;
     MisoRenderTimingStats timing;
+    uint32_t render_pass_count;
+    uint32_t draw_calls_world;
+    uint32_t draw_calls_ui;
+    uint32_t draw_calls_lines;
+    uint32_t uploaded_bytes_sprite;
+    uint32_t uploaded_bytes_world_geo;
+    uint32_t uploaded_bytes_ui_geo;
+    uint32_t uploaded_bytes_ui_text;
+    uint32_t uploaded_bytes_line;
+    uint32_t uploaded_bytes_total;
+    uint32_t instances_submitted;
+    uint32_t line_vertices_submitted;
+    uint32_t texture_upload_count;
+    uint32_t texture_upload_bytes;
+    uint32_t transient_buffer_creations;
     MisoRenderStreamStats streams[MISO_RENDER_STATS_STREAM_COUNT];
 } MisoRenderFrameStats;
 
@@ -84,8 +103,8 @@ typedef struct MisoWorldVertex {
 
 MisoResult miso_render_load_texture(const MisoEngine *engine, const char *path, MisoTextureHandle *out_texture);
 void miso_render_destroy_texture(const MisoEngine *engine, MisoTextureHandle texture);
-MisoResult miso_render_load_font(
-    const MisoEngine *engine, const char *path, float point_size, MisoFontHandle *out_font);
+MisoResult
+miso_render_load_font(const MisoEngine *engine, const char *path, float point_size, MisoFontHandle *out_font);
 void miso_render_destroy_font(const MisoEngine *engine, MisoFontHandle font);
 bool miso_render_get_frame_stats(const MisoEngine *engine, MisoRenderFrameStats *out_stats);
 

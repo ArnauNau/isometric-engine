@@ -17,13 +17,32 @@ typedef struct MisoRendererFrameStatsSnapshot {
         Uint32 ui_passes;
     } passes;
     struct {
-        float swapchain_acquire_ms;
+        float frame_cpu_ms;
+        float acquire_swapchain_ms;
+        float record_commands_ms;
         float submit_ms;
     } timing;
+    Uint32 render_pass_count;
+    Uint32 draw_calls_world;
+    Uint32 draw_calls_ui;
+    Uint32 draw_calls_lines;
+    Uint32 uploaded_bytes_sprite;
+    Uint32 uploaded_bytes_world_geo;
+    Uint32 uploaded_bytes_ui_geo;
+    Uint32 uploaded_bytes_ui_text;
+    Uint32 uploaded_bytes_line;
+    Uint32 uploaded_bytes_total;
+    Uint32 instances_submitted;
+    Uint32 line_vertices_submitted;
+    Uint32 texture_upload_count;
+    Uint32 texture_upload_bytes;
+    Uint32 transient_buffer_creations;
     struct {
         Uint32 used_bytes;
         Uint32 peak_bytes;
         Uint32 capacity_bytes;
+        Uint32 uploaded_bytes;
+        Uint32 overflow_count;
     } streams[6];
 } MisoRendererFrameStatsSnapshot;
 
