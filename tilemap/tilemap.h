@@ -81,12 +81,13 @@ typedef enum TileFlags {
  * [width * height] and indexed as [y * width + x].
  */
 typedef struct Tilemap {
-    int *tiles;       ///< Tile indices [width * height] (owned)
-    uint8_t *flags;   ///< Per-tile flags [width * height] (owned)
-    bool *occupied;   ///< Building occupancy [width * height] (owned)
-    int width;        ///< Map width in tiles
-    int height;       ///< Map height in tiles
-    Tileset *tileset; ///< Reference to the tileset (not owned)
+    int *tiles;             ///< Tile indices [width * height] (owned)
+    uint8_t *flags;         ///< Per-tile flags [width * height] (owned)
+    bool *occupied;         ///< Building occupancy [width * height] (owned)
+    void *render_instances; ///< Cached SpriteInstance array [width * height] (owned, internal)
+    int width;              ///< Map width in tiles
+    int height;             ///< Map height in tiles
+    Tileset *tileset;       ///< Reference to the tileset (not owned)
 } Tilemap;
 
 /**
@@ -130,7 +131,7 @@ int Tilemap_GetTile(const Tilemap *tilemap, int x, int y);
  * @param tile_index The tile index to set (0 to tileset->total_tiles-1).
  * @note No-op if coordinates are out of bounds.
  */
-void Tilemap_SetTile(Tilemap *tilemap, int x, int y, int tile_index);
+void Tilemap_SetTile(const Tilemap *tilemap, int x, int y, int tile_index);
 
 /**
  * @brief Get the flags for a tile.
@@ -149,7 +150,7 @@ TileFlags Tilemap_GetFlags(const Tilemap *tilemap, int x, int y);
  * @param flags   Flags to set (use bitwise OR to combine).
  * @note No-op if coordinates are out of bounds.
  */
-void Tilemap_SetFlags(Tilemap *tilemap, int x, int y, TileFlags flags);
+void Tilemap_SetFlags(const Tilemap *tilemap, int x, int y, TileFlags flags);
 
 /**
  * @brief Check if a tile is free (not occupied by a building).
@@ -168,7 +169,7 @@ bool Tilemap_IsTileFree(const Tilemap *tilemap, int x, int y);
  * @param occupied true to mark as occupied, false to mark as free.
  * @note No-op if coordinates are out of bounds.
  */
-void Tilemap_SetOccupied(Tilemap *tilemap, int x, int y, bool occupied);
+void Tilemap_SetOccupied(const Tilemap *tilemap, int x, int y, bool occupied);
 
 // =============================================================================
 // Coordinate Conversion (Isometric)
@@ -223,7 +224,8 @@ void Tilemap_Render(const Tilemap *tilemap);
  * @param iso_width  Output: isometric tile width (same as sprite width).
  * @param iso_height Output: isometric tile height (sprite height / 2).
  */
-static inline void Tileset_GetIsoDimensions(const Tileset *const tileset, float *const iso_width, float *const iso_height) {
+static inline void
+Tileset_GetIsoDimensions(const Tileset *const tileset, float *const iso_width, float *const iso_height) {
     *iso_width = (float)tileset->tile_width;
     *iso_height = (float)tileset->tile_height / 2.0f;
 }
@@ -240,7 +242,8 @@ static inline void Tileset_GetIsoDimensions(const Tileset *const tileset, float 
  * @param world_x Output: world X position.
  * @param world_y Output: world Y position.
  */
-static inline void Tilemap_TileToWorld(const Tilemap *const tilemap, const int tile_x, const int tile_y, float *const world_x, float *const world_y) {
+static inline void Tilemap_TileToWorld(
+    const Tilemap *const tilemap, const int tile_x, const int tile_y, float *const world_x, float *const world_y) {
     const float iso_w = (float)tilemap->tileset->tile_width;
     const float iso_h = (float)tilemap->tileset->tile_height / 2.0f;
     const float start_x = ((float)(tilemap->height - 1) * iso_w) / 2.0f;

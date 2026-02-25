@@ -587,7 +587,7 @@ static void CreateDepthTexture(const Uint32 width, const Uint32 height) {
         depth_texture = nullptr;
     }
 
-    SDL_GPUTextureCreateInfo depth_info = {
+    const SDL_GPUTextureCreateInfo depth_info = {
         .type = SDL_GPU_TEXTURETYPE_2D,
         .format = SDL_GPU_TEXTUREFORMAT_D16_UNORM,
         .width = width,
@@ -1005,7 +1005,9 @@ void Renderer_SetPresentMode(const SDL_GPUPresentMode mode) {
 
     if (!SDL_SetGPUSwapchainParameters(gpu_device, render_window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, mode)) {
         if (mode == SDL_GPU_PRESENTMODE_MAILBOX) {
-            SDL_LogWarn(SDL_LOG_CATEGORY_GPU, "Failed to set present mode (MAILBOX): %s. Falling back to VSYNC", SDL_GetError());
+            SDL_LogWarn(SDL_LOG_CATEGORY_GPU,
+                        "Failed to set present mode (MAILBOX): %s. Falling back to VSYNC",
+                        SDL_GetError());
             if (SDL_SetGPUSwapchainParameters(
                     gpu_device, render_window, SDL_GPU_SWAPCHAINCOMPOSITION_SDR, SDL_GPU_PRESENTMODE_VSYNC)) {
                 g_present_mode = SDL_GPU_PRESENTMODE_VSYNC;

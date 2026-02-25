@@ -3,6 +3,85 @@
 #include "../renderer/renderer.h"
 
 #include <SDL3_image/SDL_image.h>
+#include <stdint.h>
+
+static inline int tilemap_cell_index(const Tilemap *const tilemap, const int x, const int y) {
+    return y * tilemap->width + x;
+}
+
+static void
+tilemap_build_render_instance(const Tilemap *const tilemap, const int x, const int y, SpriteInstance *const out) {
+    if (!tilemap || !tilemap->tileset || !out) {
+        return;
+    }
+
+    const int idx = tilemap_cell_index(tilemap, x, y);
+    const int tile_index = tilemap->tiles[idx];
+    const uint8_t flags = tilemap->flags[idx];
+
+    const float tile_w = (float)tilemap->tileset->tile_width;
+    const float tile_h = (float)tilemap->tileset->tile_height;
+    const float iso_w = tile_w;
+    const float iso_h = tile_h / 2.0f;
+
+    const float start_x = ((float)(tilemap->height - 1) * iso_w) / 2.0f;
+    const float iso_x = start_x + (float)(x - y) * iso_w / 2.0f;
+    const float iso_y = (float)(x + y) * (iso_h / 2.0f);
+    const float depth = 1.0f - (float)(x + y) / (float)(tilemap->width + tilemap->height);
+
+    if (tile_index < 0 || tilemap->tileset->columns == 0U || tilemap->tileset->rows == 0U) {
+        *out = (SpriteInstance){.x = iso_x,
+                                .y = iso_y,
+                                .z = depth,
+                                .flags = 0.0f,
+                                .w = 0.0f,
+                                .h = 0.0f,
+                                .tile_x = (float)x,
+                                .tile_y = (float)y,
+                                .u = 0.0f,
+                                .v = 0.0f,
+                                .uw = 0.0f,
+                                .vh = 0.0f};
+        return;
+    }
+
+    const float tex_w = (float)(tilemap->tileset->columns * tilemap->tileset->tile_width);
+    const float tex_h = (float)(tilemap->tileset->rows * tilemap->tileset->tile_height);
+    const int col = tile_index % (int)tilemap->tileset->columns;
+    const int row = tile_index / (int)tilemap->tileset->columns;
+    const float u = (float)(col * (int)tilemap->tileset->tile_width) / tex_w;
+    const float v = (float)(row * (int)tilemap->tileset->tile_height) / tex_h;
+    const float uw = (float)tilemap->tileset->tile_width / tex_w;
+    const float vh = (float)tilemap->tileset->tile_height / tex_h;
+    const float is_water = (flags & TILE_FLAG_WATER) ? 1.0f : 0.0f;
+
+    *out = (SpriteInstance){.x = iso_x,
+                            .y = iso_y,
+                            .z = depth,
+                            .flags = is_water,
+                            .w = tile_w,
+                            .h = tile_h,
+                            .tile_x = (float)x,
+                            .tile_y = (float)y,
+                            .u = u,
+                            .v = v,
+                            .uw = uw,
+                            .vh = vh};
+}
+
+static void tilemap_rebuild_render_cache(const Tilemap *const tilemap) {
+    SpriteInstance *const instances = (SpriteInstance *)tilemap->render_instances;
+    if (!instances) {
+        return;
+    }
+
+    for (int y = 0; y < tilemap->height; y++) {
+        for (int x = 0; x < tilemap->width; x++) {
+            const int idx = tilemap_cell_index(tilemap, x, y);
+            tilemap_build_render_instance(tilemap, x, y, &instances[idx]);
+        }
+    }
+}
 
 // =============================================================================
 // Tileset Implementation
@@ -100,6 +179,16 @@ Tilemap *Tilemap_Create(const int width, const int height, Tileset *const tilese
         return nullptr;
     }
 
+    tilemap->render_instances = SDL_malloc(tile_count * sizeof(SpriteInstance));
+    if (!tilemap->render_instances) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate memory for tilemap render cache");
+        SDL_free(tilemap->occupied);
+        SDL_free(tilemap->flags);
+        SDL_free(tilemap->tiles);
+        SDL_free(tilemap);
+        return nullptr;
+    }
+
     // Initialize to default values
     SDL_memset(tilemap->tiles, 0, tile_count * sizeof(int));
     SDL_memset(tilemap->flags, 0, tile_count * sizeof(uint8_t));
@@ -108,6 +197,7 @@ Tilemap *Tilemap_Create(const int width, const int height, Tileset *const tilese
     tilemap->width = width;
     tilemap->height = height;
     tilemap->tileset = tileset;
+    tilemap_rebuild_render_cache(tilemap);
 
     SDL_Log("Created tilemap: %dx%d tiles", width, height);
     return tilemap;
@@ -115,6 +205,7 @@ Tilemap *Tilemap_Create(const int width, const int height, Tileset *const tilese
 
 void Tilemap_Destroy(Tilemap *const tilemap) {
     if (tilemap) {
+        SDL_free(tilemap->render_instances);
         SDL_free(tilemap->tiles);
         SDL_free(tilemap->flags);
         SDL_free(tilemap->occupied);
@@ -126,7 +217,7 @@ void Tilemap_Destroy(Tilemap *const tilemap) {
 // Tile Access
 // =============================================================================
 
-static inline bool tilemap_in_bounds(const Tilemap *tilemap, int x, int y) {
+static inline bool tilemap_in_bounds(const Tilemap *tilemap, const int x, const int y) {
     return x >= 0 && y >= 0 && x < tilemap->width && y < tilemap->height;
 }
 
@@ -134,12 +225,18 @@ int Tilemap_GetTile(const Tilemap *const tilemap, const int x, const int y) {
     if (!tilemap_in_bounds(tilemap, x, y)) {
         return -1;
     }
-    return tilemap->tiles[y * tilemap->width + x];
+    return tilemap->tiles[tilemap_cell_index(tilemap, x, y)];
 }
 
-void Tilemap_SetTile(Tilemap *const tilemap, const int x, const int y, const int tile_index) {
+void Tilemap_SetTile(const Tilemap *const tilemap, const int x, const int y, const int tile_index) {
     if (tilemap_in_bounds(tilemap, x, y)) {
-        tilemap->tiles[y * tilemap->width + x] = tile_index;
+        const int idx = tilemap_cell_index(tilemap, x, y);
+        tilemap->tiles[idx] = tile_index;
+
+        SpriteInstance *const instances = (SpriteInstance *)tilemap->render_instances;
+        if (instances) {
+            tilemap_build_render_instance(tilemap, x, y, &instances[idx]);
+        }
     }
 }
 
@@ -147,12 +244,18 @@ TileFlags Tilemap_GetFlags(const Tilemap *const tilemap, const int x, const int 
     if (!tilemap_in_bounds(tilemap, x, y)) {
         return TILE_FLAG_NONE;
     }
-    return (TileFlags)tilemap->flags[y * tilemap->width + x];
+    return (TileFlags)tilemap->flags[tilemap_cell_index(tilemap, x, y)];
 }
 
-void Tilemap_SetFlags(Tilemap *const tilemap, const int x, const int y, const TileFlags flags) {
+void Tilemap_SetFlags(const Tilemap *const tilemap, const int x, const int y, const TileFlags flags) {
     if (tilemap_in_bounds(tilemap, x, y)) {
-        tilemap->flags[y * tilemap->width + x] = (uint8_t)flags;
+        const int idx = tilemap_cell_index(tilemap, x, y);
+        tilemap->flags[idx] = (uint8_t)flags;
+
+        SpriteInstance *const instances = (SpriteInstance *)tilemap->render_instances;
+        if (instances) {
+            tilemap_build_render_instance(tilemap, x, y, &instances[idx]);
+        }
     }
 }
 
@@ -160,12 +263,12 @@ bool Tilemap_IsTileFree(const Tilemap *const tilemap, const int x, const int y) 
     if (!tilemap_in_bounds(tilemap, x, y)) {
         return false;
     }
-    return !tilemap->occupied[y * tilemap->width + x];
+    return !tilemap->occupied[tilemap_cell_index(tilemap, x, y)];
 }
 
-void Tilemap_SetOccupied(Tilemap *const tilemap, const int x, const int y, const bool occupied) {
+void Tilemap_SetOccupied(const Tilemap *const tilemap, const int x, const int y, const bool occupied) {
     if (tilemap_in_bounds(tilemap, x, y)) {
-        tilemap->occupied[y * tilemap->width + x] = occupied;
+        tilemap->occupied[tilemap_cell_index(tilemap, x, y)] = occupied;
     }
 }
 
@@ -186,7 +289,7 @@ SDL_Point Tilemap_ScreenToTile(const Tilemap *const tilemap, const float screen_
 
     // Map origin (matches Tilemap_Render start position)
     const float origin_x = ((float)(tilemap->height - 1) * iso_w) / 2.0f + half_iso_w;
-    const float origin_y = 0.0f;
+    constexpr float origin_y = 0.0f;
 
     // Mouse relative to origin
     const float rel_x = screen_x - origin_x;
@@ -211,76 +314,15 @@ void Tilemap_Render(const Tilemap *const tilemap) {
         return;
     }
 
-    const float tile_w = (float)tilemap->tileset->tile_width;
-    const float tile_h = (float)tilemap->tileset->tile_height;
-    const float iso_w = tile_w;
-    const float iso_h = tile_h / 2.0f;
-
-    // Start position for rendering (map origin in world space)
-    const float start_x = ((float)(tilemap->height - 1) * iso_w) / 2.0f;
-    const float start_y = 0.0f;
-
-    // Allocate instances for all tiles
-    const int max_tiles = tilemap->width * tilemap->height;
-    SpriteInstance *const instances = SDL_malloc(sizeof(SpriteInstance) * (size_t)max_tiles);
-    if (!instances) {
-        SDL_LogError(SDL_LOG_CATEGORY_RENDER, "Failed to allocate sprite instances");
+    const int tile_count = tilemap->width * tilemap->height;
+    if (tile_count <= 0) {
         return;
     }
 
-    int instance_count = 0;
-
-    // Texture dimensions for UV calculation
-    const float tex_w = (float)(tilemap->tileset->columns * tilemap->tileset->tile_width);
-    const float tex_h = (float)(tilemap->tileset->rows * tilemap->tileset->tile_height);
-
-    // Build sprite instances for all tiles
-    for (int y = 0; y < tilemap->height; y++) {
-        for (int x = 0; x < tilemap->width; x++) {
-            const int idx = y * tilemap->width + x;
-            const int tile_index = tilemap->tiles[idx];
-
-            if (tile_index < 0) {
-                continue; // Skip empty tiles
-            }
-
-            // Calculate isometric position
-            const float iso_x = start_x + (float)(x - y) * iso_w / 2.0f;
-            const float iso_y = start_y + (float)(x + y) * (iso_h / 2.0f);
-
-            // UV coordinates
-            const int col = tile_index % (int)tilemap->tileset->columns;
-            const int row = tile_index / (int)tilemap->tileset->columns;
-            const float u = (float)(col * (int)tilemap->tileset->tile_width) / tex_w;
-            const float v = (float)(row * (int)tilemap->tileset->tile_height) / tex_h;
-            const float uw = (float)tilemap->tileset->tile_width / tex_w;
-            const float vh = (float)tilemap->tileset->tile_height / tex_h;
-
-            // Depth: higher (x+y) = closer to camera = lower depth value
-            const float depth = 1.0f - (float)(x + y) / (float)(tilemap->width + tilemap->height);
-
-            // Check if this tile is water (for shader animation)
-            const uint8_t flags = tilemap->flags[idx];
-            const float is_water = (flags & TILE_FLAG_WATER) ? 1.0f : 0.0f;
-
-            // Tile position for wave phase calculation (passed as extra data)
-            // We pack tile_x and tile_y into the unused padding fields
-            instances[instance_count++] =
-                (SpriteInstance){.x = iso_x,
-                                 .y = iso_y,
-                                 .z = depth,
-                                 .flags = is_water, // flags field: 1.0 = water, 0.0 = not water
-                                 .w = tile_w,
-                                 .h = tile_h,
-                                 .tile_x = (float)x, // for wave phase calculation
-                                 .tile_y = (float)y, // for wave phase calculation
-                                 .u = u,
-                                 .v = v,
-                                 .uw = uw,
-                                 .vh = vh};
-        }
+    const SpriteInstance *const instances = (const SpriteInstance *)tilemap->render_instances;
+    if (!instances) {
+        return;
     }
 
-    Renderer_DrawSprites(tilemap->tileset->texture, instances, instance_count);
-    SDL_free(instances);
+    Renderer_DrawSprites(tilemap->tileset->texture, instances, tile_count);
 }

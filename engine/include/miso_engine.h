@@ -40,13 +40,13 @@ typedef void (*MisoSimTickFn)(void *user, float fixed_dt_seconds);
 typedef struct MisoGameHooks {
     void (*on_event)(void *game_ctx, const MisoEvent *event);
     void (*on_sim_tick)(void *game_ctx, float fixed_dt_seconds);
-    void (*on_render_world)(void *game_ctx, MisoEngine *engine);
-    void (*on_render_ui)(void *game_ctx, MisoEngine *engine);
-    void (*on_render_debug)(void *game_ctx, MisoEngine *engine);
-    MisoResult (*on_save)(void *game_ctx, MisoByteBuffer *out_payload, uint32_t *out_payload_version);
+    void (*on_render_world)(void *game_ctx, const MisoEngine *engine);
+    void (*on_render_ui)(void *game_ctx, const MisoEngine *engine);
+    void (*on_render_debug)(void *game_ctx, const MisoEngine *engine);
+    MisoResult (*on_save)(const void *game_ctx, MisoByteBuffer *out_payload, uint32_t *out_payload_version);
     MisoResult (*on_load)(void *game_ctx, const uint8_t *payload, size_t payload_size, uint32_t payload_version);
     void (*on_reset)(void *game_ctx);
-    uint64_t (*on_state_hash)(void *game_ctx);
+    uint64_t (*on_state_hash)(const void *game_ctx);
 } MisoGameHooks;
 
 MisoResult miso_create(const MisoConfig *cfg, MisoEngine **out_engine);
