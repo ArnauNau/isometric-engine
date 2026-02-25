@@ -170,25 +170,24 @@ const char *testbed_bench_diagnostic_mode_name(const TestbedBenchDiagnosticMode 
     }
 }
 
-static void testbed_sync_window_metrics(TestbedGame *game) {
+static void testbed_sync_window_metrics(TestbedGame *const game) {
     if (!game || !game->engine) {
         return;
     }
 
-    int new_w = game->screen_width;
-    int new_h = game->screen_height;
-    miso_get_window_size_pixels(game->engine, &new_w, &new_h);
+    int new_width, new_height;
+    miso_get_window_size_pixels(game->engine, &new_width, &new_height);
 
     float new_density = miso_get_window_pixel_density(game->engine);
     if (new_density <= 0.0f) {
         new_density = 1.0f;
     }
 
-    const bool size_changed = (new_w != game->screen_width) || (new_h != game->screen_height);
+    const bool size_changed = (new_width != game->screen_width) || (new_height != game->screen_height);
     const bool density_changed = SDL_fabsf(new_density - game->pixel_ratio) > 0.001f;
 
-    game->screen_width = new_w;
-    game->screen_height = new_h;
+    game->screen_width = new_width;
+    game->screen_height = new_height;
     game->pixel_ratio = new_density;
 
     if (size_changed || density_changed) {

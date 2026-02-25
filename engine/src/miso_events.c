@@ -44,6 +44,29 @@ static uint32_t miso__to_key_modifiers(const SDL_Keymod mod) {
     return flags;
 }
 
+static void miso__get_window_pixel_size(const MisoEngine *const engine,
+                                        const int fallback_width,
+                                        const int fallback_height,
+                                        int *const out_width,
+                                        int *const out_height) {
+    int width = fallback_width;
+    int height = fallback_height;
+
+    if (engine && engine->window) {
+        SDL_GetWindowSizeInPixels(engine->window, &width, &height);
+    }
+
+    if (width <= 0) {
+        width = 1;
+    }
+    if (height <= 0) {
+        height = 1;
+    }
+
+    *out_width = width;
+    *out_height = height;
+}
+
 bool miso_poll_event(MisoEngine *engine, MisoEvent *out_event) {
     if (!engine || !out_event) {
         return false;
@@ -64,11 +87,16 @@ bool miso_poll_event(MisoEngine *engine, MisoEvent *out_event) {
         break;
 
     case SDL_EVENT_WINDOW_RESIZED:
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
+        int pixel_width = 1;
+        int pixel_height = 1;
+        miso__get_window_pixel_size(engine, event.window.data1, event.window.data2, &pixel_width, &pixel_height);
         out_event->type = MISO_EVENT_WINDOW_RESIZED;
-        out_event->data.window_resized.width = event.window.data1;
-        out_event->data.window_resized.height = event.window.data2;
-        miso__renderer_resize(event.window.data1, event.window.data2);
+        out_event->data.window_resized.width = pixel_width;
+        out_event->data.window_resized.height = pixel_height;
+        miso__renderer_resize(pixel_width, pixel_height);
         break;
+    }
 
     case SDL_EVENT_MOUSE_MOTION:
         out_event->type = MISO_EVENT_MOUSE_MOVE;

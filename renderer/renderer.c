@@ -985,10 +985,22 @@ void Renderer_Shutdown(void) {
 }
 
 void Renderer_Resize(const int width, const int height) {
-    if (width <= 0 || height <= 0) {
+    int target_width = width;
+    int target_height = height;
+    if (render_window) {
+        int window_px_width = 0;
+        int window_px_height = 0;
+        SDL_GetWindowSizeInPixels(render_window, &window_px_width, &window_px_height);
+        if (window_px_width > 0 && window_px_height > 0) {
+            target_width = window_px_width;
+            target_height = window_px_height;
+        }
+    }
+
+    if (target_width <= 0 || target_height <= 0) {
         return;
     }
-    CreateDepthTexture((Uint32)width, (Uint32)height);
+    CreateDepthTexture((Uint32)target_width, (Uint32)target_height);
 }
 
 void Renderer_SetPresentMode(const SDL_GPUPresentMode mode) {
