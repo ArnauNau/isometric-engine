@@ -45,6 +45,13 @@ typedef enum RendererStatsStreamKind {
     RENDERER_STATS_STREAM_COUNT
 } RendererStatsStreamKind;
 
+typedef enum RendererVSyncAcquireMode {
+    // VSYNC waits for drawable availability before rendering this frame.
+    RENDERER_VSYNC_ACQUIRE_BLOCKING = 0,
+    // VSYNC polls drawable availability and skips present work when unavailable.
+    RENDERER_VSYNC_ACQUIRE_PASSTHROUGH = 1
+} RendererVSyncAcquireMode;
+
 typedef struct RendererQueueStats {
     Uint32 cmd_count;
     Uint32 draw_calls;
@@ -199,6 +206,8 @@ void Renderer_DrawFilledQuadDebug(float x, float y, float width, float height, S
 
 void Renderer_SetPresentMode(SDL_GPUPresentMode mode);
 SDL_GPUPresentMode Renderer_GetPresentMode(void);
+void Renderer_SetVSyncAcquireMode(RendererVSyncAcquireMode mode);
+RendererVSyncAcquireMode Renderer_GetVSyncAcquireMode(void);
 /*
  * Controls swapchain queue depth (1..3) independently from renderer upload stream buffering.
  * Default is 1 to favor freshest-frame throughput by dropping stale frames under backpressure.

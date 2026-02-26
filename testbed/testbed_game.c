@@ -127,6 +127,17 @@ static const char *testbed_present_mode_name(const SDL_GPUPresentMode mode) {
     }
 }
 
+static const char *testbed_vsync_acquire_mode_name(const RendererVSyncAcquireMode mode) {
+    switch (mode) {
+    case RENDERER_VSYNC_ACQUIRE_BLOCKING:
+        return "BLOCKING";
+    case RENDERER_VSYNC_ACQUIRE_PASSTHROUGH:
+        return "PASSTHROUGH";
+    default:
+        return "UNKNOWN";
+    }
+}
+
 static float testbed_bytes_to_mib(const uint32_t bytes) {
     return (float)bytes / (1024.0f * 1024.0f);
 }
@@ -1014,6 +1025,20 @@ static void testbed_game_on_render_debug(void *const ctx, const MisoEngine *cons
                               queues[MISO_RENDER_STATS_QUEUE_UI_TEXT].draw_calls);
             testbed_nk_labelf(
                 nk, NK_TEXT_LEFT, "Present mode: %s", testbed_present_mode_name(Renderer_GetPresentMode()));
+            const RendererVSyncAcquireMode vsync_acquire_mode = Renderer_GetVSyncAcquireMode();
+            testbed_nk_labelf(
+                nk, NK_TEXT_LEFT, "VSYNC acquire mode: %s", testbed_vsync_acquire_mode_name(vsync_acquire_mode));
+            const char *const vsync_acquire_items[] = {"BLOCKING", "PASSTHROUGH"};
+            int vsync_acquire_index =
+                vsync_acquire_mode == RENDERER_VSYNC_ACQUIRE_PASSTHROUGH ? 1 : 0;
+            nk_layout_row_dynamic(nk, 24 * ui_s, 2);
+            nk_label(nk, "Set VSYNC acquire", NK_TEXT_LEFT);
+            const int selected_vsync_acquire_index =
+                nk_combo(nk, vsync_acquire_items, 2, vsync_acquire_index, (int)(20 * ui_s), nk_vec2(150 * ui_s, 96 * ui_s));
+            if (selected_vsync_acquire_index != vsync_acquire_index) {
+                Renderer_SetVSyncAcquireMode(selected_vsync_acquire_index == 1 ? RENDERER_VSYNC_ACQUIRE_PASSTHROUGH
+                                                                                : RENDERER_VSYNC_ACQUIRE_BLOCKING);
+            }
             const Uint32 allowed_frames_in_flight = Renderer_GetAllowedFramesInFlight();
             testbed_nk_labelf(nk, NK_TEXT_LEFT, "Frames in flight: %u", allowed_frames_in_flight);
             const char *const frames_in_flight_items[] = {"1", "2", "3"};

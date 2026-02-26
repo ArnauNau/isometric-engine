@@ -27,6 +27,7 @@ static SDL_GPUCommandBuffer *cmd_buffer = nullptr;
 static SDL_GPUTexture *swapchain_texture = nullptr;
 static SDL_GPUTexture *depth_texture = nullptr;
 static SDL_GPUPresentMode g_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
+static RendererVSyncAcquireMode g_vsync_acquire_mode = RENDERER_VSYNC_ACQUIRE_BLOCKING;
 static bool g_upload_suppressed = false;
 
 //triple-buffered upload streams (independent from swapchain pacing)
@@ -1047,10 +1048,21 @@ void Renderer_SetPresentMode(const SDL_GPUPresentMode mode) {
 
 void Renderer_SetVSync(const bool enabled) {
     Renderer_SetPresentMode(enabled ? SDL_GPU_PRESENTMODE_MAILBOX : SDL_GPU_PRESENTMODE_IMMEDIATE);
+    if (enabled) {
+        g_vsync_acquire_mode = RENDERER_VSYNC_ACQUIRE_BLOCKING;
+    }
 }
 
 SDL_GPUPresentMode Renderer_GetPresentMode(void) {
     return g_present_mode;
+}
+
+void Renderer_SetVSyncAcquireMode(const RendererVSyncAcquireMode mode) {
+    g_vsync_acquire_mode = mode;
+}
+
+RendererVSyncAcquireMode Renderer_GetVSyncAcquireMode(void) {
+    return g_vsync_acquire_mode;
 }
 
 bool Renderer_SetAllowedFramesInFlight(const Uint32 allowed_frames_in_flight) {
@@ -1185,8 +1197,12 @@ void Renderer_BeginFrame(void) {
     }
 
     const Uint64 acquire_start = SDL_GetPerformanceCounter();
-    const bool got_swapchain =
-        SDL_AcquireGPUSwapchainTexture(cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr);
+    const bool blocking_acquire =
+        g_present_mode == SDL_GPU_PRESENTMODE_VSYNC && g_vsync_acquire_mode == RENDERER_VSYNC_ACQUIRE_BLOCKING;
+    const bool got_swapchain = blocking_acquire
+                                   ? SDL_WaitAndAcquireGPUSwapchainTexture(
+                                         cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr)
+                                   : SDL_AcquireGPUSwapchainTexture(cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr);
     const Uint64 acquire_end = SDL_GetPerformanceCounter();
     g_frame_stats.timing.acquire_swapchain_ms = renderer_elapsed_ms(acquire_start, acquire_end);
 
