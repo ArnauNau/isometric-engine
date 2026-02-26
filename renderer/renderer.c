@@ -29,7 +29,11 @@ static SDL_GPUTexture *depth_texture = nullptr;
 static SDL_GPUPresentMode g_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
 static bool g_upload_suppressed = false;
 
-#define RENDERER_FRAMES_IN_FLIGHT 3U
+//triple-buffered upload streams (independent from swapchain pacing)
+#define RENDERER_STREAM_FRAMES_IN_FLIGHT 3U
+// 1 -> fresh frames by limiting in-flight queue depth
+#define RENDERER_DEFAULT_ALLOWED_FRAMES_IN_FLIGHT 1U
+static Uint32 g_allowed_frames_in_flight = RENDERER_DEFAULT_ALLOWED_FRAMES_IN_FLIGHT;
 #define RENDERER_STREAM_ALIGN 16U
 
 #define RENDERER_MAX_SPRITE_CMDS 4096U
@@ -206,7 +210,7 @@ static SDL_GPUShader *LoadShader(SDL_GPUDevice *const device,
 static bool
 renderer_stream_init(RendererUploadStream *const stream, const SDL_GPUBufferUsageFlags usage, const Uint32 slot_size) {
     stream->slot_size = renderer_align_up(slot_size, RENDERER_STREAM_ALIGN);
-    stream->total_size = stream->slot_size * RENDERER_FRAMES_IN_FLIGHT;
+    stream->total_size = stream->slot_size * RENDERER_STREAM_FRAMES_IN_FLIGHT;
 
     const SDL_GPUBufferCreateInfo gpu_info = {
         .usage = usage,
@@ -611,6 +615,13 @@ bool Renderer_Init(SDL_Window *const window) {
     if (!SDL_ClaimWindowForGPUDevice(gpu_device, window)) {
         SDL_LogError(SDL_LOG_CATEGORY_GPU, "Failed to claim window for GPU device: %s", SDL_GetError());
         return false;
+    }
+
+    if (!SDL_SetGPUAllowedFramesInFlight(gpu_device, g_allowed_frames_in_flight)) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_GPU,
+                    "Failed to set allowed frames in flight (%u): %s",
+                    g_allowed_frames_in_flight,
+                    SDL_GetError());
     }
 
     if (!SDL_SetGPUSwapchainParameters(
@@ -1042,6 +1053,25 @@ SDL_GPUPresentMode Renderer_GetPresentMode(void) {
     return g_present_mode;
 }
 
+bool Renderer_SetAllowedFramesInFlight(const Uint32 allowed_frames_in_flight) {
+    if (!gpu_device || allowed_frames_in_flight < 1U || allowed_frames_in_flight > 3U) {
+        return false;
+    }
+
+    if (!SDL_SetGPUAllowedFramesInFlight(gpu_device, allowed_frames_in_flight)) {
+        SDL_LogError(
+            SDL_LOG_CATEGORY_GPU, "Failed to set allowed frames in flight (%u): %s", allowed_frames_in_flight, SDL_GetError());
+        return false;
+    }
+
+    g_allowed_frames_in_flight = allowed_frames_in_flight;
+    return true;
+}
+
+Uint32 Renderer_GetAllowedFramesInFlight(void) {
+    return g_allowed_frames_in_flight;
+}
+
 void Renderer_SetUploadSuppressed(const bool enabled) {
     g_upload_suppressed = enabled;
 }
@@ -1177,7 +1207,7 @@ void Renderer_BeginFrame(void) {
         return;
     }
 
-    current_frame_slot = (current_frame_slot + 1U) % RENDERER_FRAMES_IN_FLIGHT;
+    current_frame_slot = (current_frame_slot + 1U) % RENDERER_STREAM_FRAMES_IN_FLIGHT;
 
     if (!renderer_stream_begin_frame(&sprite_stream, current_frame_slot) ||
         !renderer_stream_begin_frame(&world_geom_stream, current_frame_slot) ||

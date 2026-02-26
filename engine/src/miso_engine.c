@@ -352,7 +352,7 @@ MisoCameraId miso_camera_create(MisoEngine *engine) {
     return engine->camera_count;
 }
 
-void miso__camera_get_view_projection(const MisoEngine *engine, MisoCameraId id, float out_matrix[16]) {
+void miso__camera_get_view_projection(const MisoEngine *const engine, const MisoCameraId id, float out_matrix[16]) {
     SDL_memset(out_matrix, 0, sizeof(float) * 16U);
     const MisoCameraState *camera = miso__camera_get_const(engine, id);
     if (!camera) {

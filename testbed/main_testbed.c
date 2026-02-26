@@ -9,7 +9,6 @@
 #include <float.h>
 #include <limits.h>
 #include <signal.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -21,6 +20,7 @@
 #define BENCH_DEFAULT_WARMUP_S 2.0f
 #define BENCH_DEFAULT_SAMPLE_S 10.0f
 #define BENCH_DEFAULT_REPETITIONS 3
+#define BENCH_DEFAULT_ALLOWED_FRAMES_IN_FLIGHT 1
 #define BENCH_BASELINE_SPAWN_COUNT 256
 #define BENCH_STRESS_SPAWN_COUNT 512
 #define BENCH_ACQUIRE_BURST_THRESHOLD_MS 8.0f
@@ -49,6 +49,7 @@ typedef struct BenchCliOptions {
     float sample_s;
     int repetitions;
     int repeat_index;
+    int allowed_frames_in_flight;
     const char *output_dir;
     const char *baseline_metrics_csv;
     bool help;
@@ -62,6 +63,7 @@ typedef struct BenchScenario {
     bool debug_ui_enabled;
     bool profiler_enabled;
     int spawn_count;
+    int allowed_frames_in_flight;
     bool gates_enabled;
     char name[256];
 } BenchScenario;
@@ -332,6 +334,8 @@ static void bench_print_usage(const char *const argv0) {
     SDL_Log("  --warmup-s <seconds>          Warmup duration before sampling (default: %.1f)", BENCH_DEFAULT_WARMUP_S);
     SDL_Log("  --sample-s <seconds>          Sampling duration (default: %.1f)", BENCH_DEFAULT_SAMPLE_S);
     SDL_Log("  --repetitions <count>         Repetitions per scenario (default: %d)", BENCH_DEFAULT_REPETITIONS);
+    SDL_Log("  --frames-in-flight <n>        Allowed swapchain frames in flight (1-3, default: %d)",
+            BENCH_DEFAULT_ALLOWED_FRAMES_IN_FLIGHT);
     SDL_Log("  --repeat-index <index>        Run only one repetition index (0-based)");
     SDL_Log("  --output-dir <path>           Root output dir (default: %s)", BENCH_DEFAULT_OUTPUT_DIR);
     SDL_Log("  --baseline <suite_metrics.csv> Compare against prior suite metrics");
@@ -353,6 +357,7 @@ static BenchCliOptions bench_default_cli_options(void) {
         .sample_s = BENCH_DEFAULT_SAMPLE_S,
         .repetitions = BENCH_DEFAULT_REPETITIONS,
         .repeat_index = -1,
+        .allowed_frames_in_flight = BENCH_DEFAULT_ALLOWED_FRAMES_IN_FLIGHT,
         .output_dir = BENCH_DEFAULT_OUTPUT_DIR,
         .baseline_metrics_csv = NULL,
         .help = false,
@@ -485,6 +490,15 @@ static bool bench_parse_cli_options(const int argc, char **const argv, BenchCliO
         if (SDL_strcmp(arg, "--repetitions") == 0) {
             if (i + 1 >= argc || !bench_parse_int(argv[++i], &options.repetitions) || options.repetitions <= 0) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Invalid --repetitions value");
+                return false;
+            }
+            continue;
+        }
+
+        if (SDL_strcmp(arg, "--frames-in-flight") == 0) {
+            if (i + 1 >= argc || !bench_parse_int(argv[++i], &options.allowed_frames_in_flight) ||
+                options.allowed_frames_in_flight < 1 || options.allowed_frames_in_flight > 3) {
+                SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Invalid --frames-in-flight value. Expected: 1|2|3");
                 return false;
             }
             continue;
@@ -798,8 +812,9 @@ static void bench_scenario_make_name(BenchScenario *const scenario) {
 
     SDL_snprintf(scenario->name,
                  sizeof(scenario->name),
-                 "%s__%s__wire_%s__diag_%s__spawn_%d",
+                 "%s__fif_%d__%s__wire_%s__diag_%s__spawn_%d",
                  bench_present_mode_slug(scenario->present_mode),
+                 scenario->allowed_frames_in_flight,
                  testbed_bench_camera_state_name(scenario->camera_state),
                  scenario->wireframe_enabled ? "on" : "off",
                  testbed_bench_diagnostic_mode_name(scenario->diagnostic_mode),
@@ -878,6 +893,7 @@ static bool bench_write_run_summary_json(const BenchScenario *const scenario,
     fprintf(json_file, "  \"wireframe_enabled\": %s,\n", scenario->wireframe_enabled ? "true" : "false");
     fprintf(
         json_file, "  \"diagnostic_mode\": \"%s\",\n", testbed_bench_diagnostic_mode_name(scenario->diagnostic_mode));
+    fprintf(json_file, "  \"allowed_frames_in_flight\": %d,\n", scenario->allowed_frames_in_flight);
     fprintf(json_file, "  \"spawn_count\": %d,\n", scenario->spawn_count);
     fprintf(json_file, "  \"sampled_frames\": %u,\n", summary->sampled_frames);
 
@@ -1015,6 +1031,14 @@ static bool bench_run_single_scenario(MisoEngine *const engine,
     testbed_game_set_benchmark_camera_state(game, scenario->camera_state);
     testbed_game_set_benchmark_upload_suppressed(game, false);
     testbed_game_reset_benchmark_scene(game, scenario->spawn_count);
+
+    if (!Renderer_SetAllowedFramesInFlight((Uint32)scenario->allowed_frames_in_flight)) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
+                     "Failed to set allowed frames in flight to %d for scenario %s",
+                     scenario->allowed_frames_in_flight,
+                     scenario->name);
+        return false;
+    }
 
     Renderer_SetPresentMode(scenario->present_mode);
 
@@ -1265,6 +1289,7 @@ static bool bench_collect_suite_scenarios(const BenchCliOptions *const options,
                         .debug_ui_enabled = options->debug_ui_enabled,
                         .profiler_enabled = options->profiler_enabled,
                         .spawn_count = options->spawn_count,
+                        .allowed_frames_in_flight = options->allowed_frames_in_flight,
                         .gates_enabled = options->diagnostic_mode == TESTBED_BENCH_DIAGNOSTIC_DEFAULT,
                     };
                     bench_scenario_make_name(&scenario);
@@ -1281,6 +1306,7 @@ static bool bench_collect_suite_scenarios(const BenchCliOptions *const options,
             .debug_ui_enabled = options->debug_ui_enabled,
             .profiler_enabled = options->profiler_enabled,
             .spawn_count = options->spawn_count,
+            .allowed_frames_in_flight = options->allowed_frames_in_flight,
             .gates_enabled = options->diagnostic_mode == TESTBED_BENCH_DIAGNOSTIC_DEFAULT,
         };
         bench_scenario_make_name(&scenario);
@@ -1548,6 +1574,7 @@ static bool bench_write_suite_summary_json(const char *const suite_dir,
         fprintf(json_file,
                 "      \"diagnostic_mode\": \"%s\",\n",
                 testbed_bench_diagnostic_mode_name(entry->scenario.diagnostic_mode));
+        fprintf(json_file, "      \"allowed_frames_in_flight\": %d,\n", entry->scenario.allowed_frames_in_flight);
         fprintf(json_file, "      \"spawn_count\": %d,\n", entry->scenario.spawn_count);
         fprintf(json_file, "      \"run_count\": %d,\n", entry->run_count);
         fprintf(json_file, "      \"gate_failed_runs\": %d,\n", entry->gate_failed_runs);
@@ -1826,6 +1853,7 @@ int main(int argc, char **argv) {
     SDL_Log("Benchmark mode enabled");
     SDL_Log("Build type: %s", bench_build_type_name());
     SDL_Log("Output dir: %s", options.output_dir);
+    SDL_Log("Allowed frames in flight: %d", options.allowed_frames_in_flight);
     SDL_Log("Warmup: %.2fs | Sample: %.2fs | Repetitions: %d", options.warmup_s, options.sample_s, options.repetitions);
 
     bench_install_signal_handlers();

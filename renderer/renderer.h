@@ -199,6 +199,12 @@ void Renderer_DrawFilledQuadDebug(float x, float y, float width, float height, S
 
 void Renderer_SetPresentMode(SDL_GPUPresentMode mode);
 SDL_GPUPresentMode Renderer_GetPresentMode(void);
+/*
+ * Controls swapchain queue depth (1..3) independently from renderer upload stream buffering.
+ * Default is 1 to favor freshest-frame throughput by dropping stale frames under backpressure.
+ */
+bool Renderer_SetAllowedFramesInFlight(Uint32 allowed_frames_in_flight);
+Uint32 Renderer_GetAllowedFramesInFlight(void);
 void Renderer_SetUploadSuppressed(bool enabled);
 bool Renderer_GetUploadSuppressed(void);
 const RendererFrameStats *Renderer_GetFrameStats(void);

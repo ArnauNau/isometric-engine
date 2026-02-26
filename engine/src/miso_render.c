@@ -50,7 +50,8 @@ static bool miso__ensure_world_geometry_scratch(const int vertex_count) {
     return true;
 }
 
-MisoResult miso_render_load_texture(const MisoEngine *engine, const char *path, MisoTextureHandle *out_texture) {
+MisoResult
+miso_render_load_texture(const MisoEngine *const engine, const char *const path, MisoTextureHandle *const out_texture) {
     (void)engine;
 
     if (!path || !out_texture) {
@@ -74,7 +75,7 @@ MisoResult miso_render_load_texture(const MisoEngine *engine, const char *path, 
     return MISO_ERR_OUT_OF_MEMORY;
 }
 
-void miso_render_destroy_texture(const MisoEngine *engine, const MisoTextureHandle texture) {
+void miso_render_destroy_texture(const MisoEngine *const engine, const MisoTextureHandle texture) {
     (void)engine;
 
     if (texture == 0 || texture >= MISO_TEXTURE_TABLE_MAX || !g_texture_table[texture]) {
@@ -85,8 +86,10 @@ void miso_render_destroy_texture(const MisoEngine *engine, const MisoTextureHand
     g_texture_table[texture] = nullptr;
 }
 
-MisoResult
-miso_render_load_font(const MisoEngine *engine, const char *path, float point_size, MisoFontHandle *out_font) {
+MisoResult miso_render_load_font(const MisoEngine *const engine,
+                                 const char *const path,
+                                 const float point_size,
+                                 MisoFontHandle *const out_font) {
     (void)engine;
 
     if (!path || !out_font || point_size <= 0.0f) {
@@ -123,7 +126,7 @@ miso_render_load_font(const MisoEngine *engine, const char *path, float point_si
     return MISO_ERR_OUT_OF_MEMORY;
 }
 
-void miso_render_destroy_font(const MisoEngine *engine, const MisoFontHandle font) {
+void miso_render_destroy_font(const MisoEngine *const engine, const MisoFontHandle font) {
     (void)engine;
 
     if (font == 0 || font >= MISO_FONT_TABLE_MAX || !g_font_table[font].font) {
@@ -156,7 +159,7 @@ bool miso_render_get_frame_stats(const MisoEngine *engine, MisoRenderFrameStats 
     return true;
 }
 
-void miso_render_begin_world(MisoEngine *engine, const MisoCameraId camera_id) {
+void miso_render_begin_world(const MisoEngine *const engine, const MisoCameraId camera_id) {
     if (!engine) {
         return;
     }
@@ -167,7 +170,7 @@ void miso_render_begin_world(MisoEngine *engine, const MisoCameraId camera_id) {
 }
 
 void miso_render_set_water_params(
-    const MisoEngine *engine, const float time, const float speed, const float amplitude, const float phase) {
+    const MisoEngine *const engine, const float time, const float speed, const float amplitude, const float phase) {
     (void)engine;
     miso__renderer_set_water_params(time, speed, amplitude, phase);
 }
@@ -185,7 +188,9 @@ void miso_render_submit_sprites(const MisoEngine *engine,
     miso__renderer_draw_sprites(g_texture_table[texture], instances, count);
 }
 
-void miso_render_submit_world_geometry(const MisoEngine *engine, const MisoWorldVertex *vertices, int count) {
+void miso_render_submit_world_geometry(const MisoEngine *const engine,
+                                       const MisoWorldVertex *const vertices,
+                                       const int count) {
     (void)engine;
 
     if (!vertices || count <= 0) {
@@ -216,14 +221,14 @@ void miso_render_begin_ui(const MisoEngine *engine) {
 }
 
 void miso_render_submit_ui_rect(
-    const MisoEngine *engine, const float x, const float y, const float w, const float h, const uint32_t rgba8) {
+    const MisoEngine *const engine, const float x, const float y, const float w, const float h, const uint32_t rgba8) {
     (void)engine;
     miso__renderer_ui_fill_rect(x, y, w, h, miso__color_from_rgba8(rgba8));
 }
 
-void miso_render_submit_ui_text(const MisoEngine *engine,
+void miso_render_submit_ui_text(const MisoEngine *const engine,
                                 const MisoFontHandle font,
-                                const char *text,
+                                const char *const text,
                                 const float x,
                                 const float y,
                                 const uint32_t rgba8) {
@@ -250,7 +255,7 @@ void miso__render_shutdown(void) {
     for (uint32_t i = 1; i < MISO_TEXTURE_TABLE_MAX; i++) {
         if (g_texture_table[i]) {
             miso__renderer_destroy_texture(g_texture_table[i]);
-            g_texture_table[i] = NULL;
+            g_texture_table[i] = nullptr;
         }
     }
 
@@ -261,11 +266,11 @@ void miso__render_shutdown(void) {
         if (g_font_table[i].font) {
             TTF_CloseFont(g_font_table[i].font);
         }
-        g_font_table[i].text = NULL;
-        g_font_table[i].font = NULL;
+        g_font_table[i].text = nullptr;
+        g_font_table[i].font = nullptr;
     }
 
     SDL_free(g_world_geometry_scratch);
-    g_world_geometry_scratch = NULL;
+    g_world_geometry_scratch = nullptr;
     g_world_geometry_scratch_capacity = 0;
 }

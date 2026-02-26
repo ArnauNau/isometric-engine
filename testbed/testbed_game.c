@@ -1014,6 +1014,28 @@ static void testbed_game_on_render_debug(void *const ctx, const MisoEngine *cons
                               queues[MISO_RENDER_STATS_QUEUE_UI_TEXT].draw_calls);
             testbed_nk_labelf(
                 nk, NK_TEXT_LEFT, "Present mode: %s", testbed_present_mode_name(Renderer_GetPresentMode()));
+            const Uint32 allowed_frames_in_flight = Renderer_GetAllowedFramesInFlight();
+            testbed_nk_labelf(nk, NK_TEXT_LEFT, "Frames in flight: %u", allowed_frames_in_flight);
+            const char *const frames_in_flight_items[] = {"1", "2", "3"};
+            int frames_in_flight_index = 0;
+            if (allowed_frames_in_flight >= 1U && allowed_frames_in_flight <= 3U) {
+                frames_in_flight_index = (int)allowed_frames_in_flight - 1;
+            }
+            nk_layout_row_dynamic(nk, 24 * ui_s, 2);
+            nk_label(nk, "Set frames in flight", NK_TEXT_LEFT);
+            const int selected_frames_in_flight = nk_combo(nk,
+                                                           frames_in_flight_items,
+                                                           3,
+                                                           frames_in_flight_index,
+                                                           (int)(20 * ui_s),
+                                                           nk_vec2(90 * ui_s, 120 * ui_s));
+            if (selected_frames_in_flight != frames_in_flight_index &&
+                !Renderer_SetAllowedFramesInFlight((Uint32)(selected_frames_in_flight + 1))) {
+                SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                            "Failed to set frames in flight to %d from debug UI",
+                            selected_frames_in_flight + 1);
+            }
+            nk_layout_row_dynamic(nk, 20 * ui_s, 1);
             testbed_nk_labelf(nk, NK_TEXT_LEFT, "Pixel density: %.2f", game->pixel_ratio);
             testbed_nk_labelf(nk, NK_TEXT_LEFT, "Frame CPU: %.3f ms", stats.timing.frame_cpu_ms);
             testbed_nk_labelf(nk, NK_TEXT_LEFT, "Acquire swapchain: %.3f ms", stats.timing.acquire_swapchain_ms);

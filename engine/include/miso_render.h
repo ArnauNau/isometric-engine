@@ -108,7 +108,7 @@ miso_render_load_font(const MisoEngine *engine, const char *path, float point_si
 void miso_render_destroy_font(const MisoEngine *engine, MisoFontHandle font);
 bool miso_render_get_frame_stats(const MisoEngine *engine, MisoRenderFrameStats *out_stats);
 
-void miso_render_begin_world(MisoEngine *engine, MisoCameraId camera_id);
+void miso_render_begin_world(const MisoEngine *engine, MisoCameraId camera_id);
 void miso_render_set_water_params(const MisoEngine *engine, float time, float speed, float amplitude, float phase);
 void miso_render_submit_sprites(const MisoEngine *engine,
                                 MisoTextureHandle texture,
