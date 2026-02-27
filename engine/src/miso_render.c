@@ -142,21 +142,14 @@ void miso_render_destroy_font(const MisoEngine *const engine, const MisoFontHand
     g_font_table[font].font = nullptr;
 }
 
-bool miso_render_get_frame_stats(const MisoEngine *engine, MisoRenderFrameStats *out_stats) {
+void miso_render_set_vsync(const MisoEngine *const engine, const bool enabled) {
     (void)engine;
+    miso__renderer_set_vsync(enabled);
+}
 
-    if (!out_stats) {
-        return false;
-    }
-
-    MisoRendererFrameStatsSnapshot snapshot;
-    if (!miso__renderer_copy_frame_stats(&snapshot)) {
-        SDL_memset(out_stats, 0, sizeof(*out_stats));
-        return false;
-    }
-
-    SDL_memcpy(out_stats, &snapshot, sizeof(*out_stats));
-    return true;
+bool miso_render_get_vsync(const MisoEngine *const engine) {
+    (void)engine;
+    return miso__renderer_get_vsync();
 }
 
 void miso_render_begin_world(const MisoEngine *const engine, const MisoCameraId camera_id) {

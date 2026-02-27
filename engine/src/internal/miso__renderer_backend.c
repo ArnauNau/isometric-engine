@@ -23,6 +23,11 @@ void miso__renderer_set_vsync(bool enabled) {
     Renderer_SetVSync(enabled);
 }
 
+bool miso__renderer_get_vsync(void) {
+    const SDL_GPUPresentMode mode = Renderer_GetPresentMode();
+    return mode != SDL_GPU_PRESENTMODE_IMMEDIATE;
+}
+
 void miso__renderer_begin_frame(void) {
     Renderer_BeginFrame();
 }
@@ -51,12 +56,21 @@ void miso__renderer_draw_sprites(SDL_GPUTexture *texture, const void *instances,
     Renderer_DrawSprites(texture, (const SpriteInstance *)instances, count);
 }
 
+void miso__renderer_draw_native_sprites(void *texture, const void *instances, int count) {
+    Renderer_DrawSprites((SDL_GPUTexture *)texture, (const SpriteInstance *)instances, count);
+}
+
 void miso__renderer_draw_line_batch(const float *vertices_xyz, const int vertex_count, const SDL_FColor color) {
     Renderer_DrawLineBatch(vertices_xyz, vertex_count, color);
 }
 
 void miso__renderer_draw_geometry(const SDL_Vertex *vertices, int count) {
     Renderer_DrawGeometry(vertices, count);
+}
+
+void miso__renderer_draw_texture_debug(
+    void *texture, const float x, const float y, const float width, const float height) {
+    Renderer_DrawTextureDebug((SDL_GPUTexture *)texture, x, y, width, height);
 }
 
 bool miso__renderer_copy_frame_stats(MisoRendererFrameStatsSnapshot *out_stats) {
@@ -76,6 +90,38 @@ bool miso__renderer_copy_frame_stats(MisoRendererFrameStatsSnapshot *out_stats) 
 
 TTF_TextEngine *miso__renderer_get_text_engine(void) {
     return Renderer_GetTextEngine();
+}
+
+void miso__renderer_set_present_mode(const int mode) {
+    Renderer_SetPresentMode((SDL_GPUPresentMode)mode);
+}
+
+int miso__renderer_get_present_mode(void) {
+    return (int)Renderer_GetPresentMode();
+}
+
+void miso__renderer_set_vsync_acquire_mode(const int mode) {
+    Renderer_SetVSyncAcquireMode((RendererVSyncAcquireMode)mode);
+}
+
+int miso__renderer_get_vsync_acquire_mode(void) {
+    return (int)Renderer_GetVSyncAcquireMode();
+}
+
+bool miso__renderer_set_allowed_frames_in_flight(const Uint32 allowed_frames_in_flight) {
+    return Renderer_SetAllowedFramesInFlight(allowed_frames_in_flight);
+}
+
+Uint32 miso__renderer_get_allowed_frames_in_flight(void) {
+    return Renderer_GetAllowedFramesInFlight();
+}
+
+void miso__renderer_set_upload_suppressed(const bool enabled) {
+    Renderer_SetUploadSuppressed(enabled);
+}
+
+bool miso__renderer_get_upload_suppressed(void) {
+    return Renderer_GetUploadSuppressed();
 }
 
 void miso__renderer_ui_init(void) {
