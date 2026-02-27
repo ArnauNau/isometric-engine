@@ -1,6 +1,10 @@
 #ifndef RENDERER_H
 #define RENDERER_H
 
+/* Private low-level renderer backend. Engine clients should use miso_render.h
+ * or miso_render_diagnostics.h; engine internals should use
+ * miso__renderer_backend.h. */
+
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 

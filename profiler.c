@@ -228,14 +228,18 @@ static TTF_TextEngine *prof_text_engine = nullptr;
 static TTF_Text *title_text = nullptr;
 static TTF_Text *prof_category_texts[PROFILER_CATEGORY_COUNT] = {nullptr};
 
-void PROF_initUI(TTF_TextEngine *engine, TTF_Font *font) {
-    prof_text_engine = engine;
+void PROF_initUI(TTF_Font *const font) {
+    prof_text_engine = UI_GetTextEngine();
     prof_font = font;
 
+    if (!prof_text_engine || !prof_font) {
+        return;
+    }
+
     // Pre-create TTF_Text objects for each category
-    title_text = TTF_CreateText(engine, font, "Debug Info", 0);
+    title_text = TTF_CreateText(prof_text_engine, prof_font, "Debug Info", 0);
     for (int i = 0; i < PROFILER_CATEGORY_COUNT; i++) {
-        prof_category_texts[i] = TTF_CreateText(engine, font, "", 0);
+        prof_category_texts[i] = TTF_CreateText(prof_text_engine, prof_font, "", 0);
     }
 }
 

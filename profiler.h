@@ -101,10 +101,9 @@ void PROF_getFPS(float *SDL_RESTRICT min, float *SDL_RESTRICT avg, float *SDL_RE
 /**
  * Initialize the GPU profiler rendering resources.
  * Must be called once after the renderer is initialized.
- * @param engine The TTF text engine from Renderer_GetTextEngine()
  * @param font The font to use for profiler text
  */
-void PROF_initUI(TTF_TextEngine *engine, TTF_Font *font);
+void PROF_initUI(TTF_Font *font);
 
 /**
  * Shutdown and free GPU profiler rendering resources.
