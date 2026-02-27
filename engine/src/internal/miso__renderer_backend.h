@@ -58,6 +58,7 @@ void miso__renderer_destroy_texture(SDL_GPUTexture *texture);
 void miso__renderer_set_view_projection(const float *view_projection);
 void miso__renderer_set_water_params(float time, float speed, float amplitude, float phase);
 void miso__renderer_draw_sprites(SDL_GPUTexture *texture, const void *instances, int count);
+void miso__renderer_draw_line_batch(const float *vertices_xyz, int vertex_count, SDL_FColor color);
 void miso__renderer_draw_geometry(const SDL_Vertex *vertices, int count);
 bool miso__renderer_copy_frame_stats(MisoRendererFrameStatsSnapshot *out_stats);
 TTF_TextEngine *miso__renderer_get_text_engine(void);

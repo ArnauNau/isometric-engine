@@ -212,6 +212,19 @@ void miso_render_submit_world_geometry(const MisoEngine *const engine,
     miso__renderer_draw_geometry(g_world_geometry_scratch, count);
 }
 
+void miso_render_submit_world_lines(const MisoEngine *const engine,
+                                    const float *const vertices_xyz,
+                                    const int vertex_count,
+                                    const uint32_t rgba8) {
+    (void)engine;
+
+    if (!vertices_xyz || vertex_count <= 0 || (vertex_count & 1) != 0) {
+        return;
+    }
+
+    miso__renderer_draw_line_batch(vertices_xyz, vertex_count, miso__color_from_rgba8(rgba8));
+}
+
 void miso_render_end_world(const MisoEngine *engine) {
     (void)engine;
 }

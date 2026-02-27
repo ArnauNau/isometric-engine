@@ -400,14 +400,23 @@ static void testbed_render_tile_highlight(const TestbedGame *const game,
     const float left_y = world_y + iso_h / 2.0f;
 
     const float depth = Tilemap_GetTileDepth(game->tilemap, tile_x, tile_y) - 0.002f;
-
-    Renderer_DrawLine(top_x, top_y, depth, right_x, right_y, depth, color);
-    Renderer_DrawLine(right_x, right_y, depth, bottom_x, bottom_y, depth, color);
-    Renderer_DrawLine(bottom_x, bottom_y, depth, left_x, left_y, depth, color);
-    Renderer_DrawLine(left_x, left_y, depth, top_x, top_y, depth, color);
-
     constexpr float beacon_height = 200.0f;
-    Renderer_DrawLine(top_x, top_y, depth, top_x, top_y - beacon_height, depth, color);
+    float line_vertices[30] = {0.0f};
+    int vertex_count = 0;
+    const int line_capacity = (int)(SDL_arraysize(line_vertices) / 3U);
+    testbed_wireframe_push_line(
+        line_vertices, line_capacity, &vertex_count, top_x, top_y, depth, right_x, right_y, depth);
+    testbed_wireframe_push_line(
+        line_vertices, line_capacity, &vertex_count, right_x, right_y, depth, bottom_x, bottom_y, depth);
+    testbed_wireframe_push_line(
+        line_vertices, line_capacity, &vertex_count, bottom_x, bottom_y, depth, left_x, left_y, depth);
+    testbed_wireframe_push_line(
+        line_vertices, line_capacity, &vertex_count, left_x, left_y, depth, top_x, top_y, depth);
+    testbed_wireframe_push_line(
+        line_vertices, line_capacity, &vertex_count, top_x, top_y, depth, top_x, top_y - beacon_height, depth);
+    const uint32_t rgba8 = ((uint32_t)(color.r * 255.0f) << 24) | ((uint32_t)(color.g * 255.0f) << 16) |
+                           ((uint32_t)(color.b * 255.0f) << 8) | (uint32_t)(color.a * 255.0f);
+    miso_render_submit_world_lines(game->engine, line_vertices, vertex_count, rgba8);
 }
 
 static WireframeMesh testbed_build_wireframe_mesh(const float iso_x,

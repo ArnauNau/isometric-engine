@@ -51,6 +51,10 @@ void miso__renderer_draw_sprites(SDL_GPUTexture *texture, const void *instances,
     Renderer_DrawSprites(texture, (const SpriteInstance *)instances, count);
 }
 
+void miso__renderer_draw_line_batch(const float *vertices_xyz, const int vertex_count, const SDL_FColor color) {
+    Renderer_DrawLineBatch(vertices_xyz, vertex_count, color);
+}
+
 void miso__renderer_draw_geometry(const SDL_Vertex *vertices, int count) {
     Renderer_DrawGeometry(vertices, count);
 }

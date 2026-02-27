@@ -115,6 +115,10 @@ void miso_render_submit_sprites(const MisoEngine *engine,
                                 const MisoSpriteInstance *instances,
                                 int count);
 void miso_render_submit_world_geometry(const MisoEngine *engine, const MisoWorldVertex *vertices, int count);
+void miso_render_submit_world_lines(const MisoEngine *engine,
+                                    const float *vertices_xyz,
+                                    int vertex_count,
+                                    uint32_t rgba8);
 void miso_render_end_world(const MisoEngine *engine);
 
 void miso_render_begin_ui(const MisoEngine *engine);
