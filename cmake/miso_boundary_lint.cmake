@@ -28,7 +28,7 @@ endif()
 
 function(miso_boundary_lint include_pattern violation_message)
   set(options)
-  set(oneValueArgs)
+  set(oneValueArgs ALLOW_PATTERN)
   set(multiValueArgs PATHS)
   cmake_parse_arguments(LINT "${options}" "${oneValueArgs}" "${multiValueArgs}" ${ARGN})
 
@@ -49,9 +49,38 @@ function(miso_boundary_lint include_pattern violation_message)
   endif()
 
   if(lint_rc EQUAL 0)
-    message(FATAL_ERROR "${violation_message}\n${lint_out}")
+    set(filtered_out "${lint_out}")
+    if(DEFINED LINT_ALLOW_PATTERN AND NOT LINT_ALLOW_PATTERN STREQUAL "")
+      string(REPLACE "\n" ";" lint_lines "${lint_out}")
+      set(filtered_lines)
+      foreach(line IN LISTS lint_lines)
+        if(line STREQUAL "")
+          continue()
+        endif()
+        if(NOT line MATCHES "${LINT_ALLOW_PATTERN}")
+          list(APPEND filtered_lines "${line}")
+        endif()
+      endforeach()
+
+      if(filtered_lines)
+        string(JOIN "\n" filtered_out ${filtered_lines})
+      else()
+        set(filtered_out "")
+      endif()
+    endif()
+
+    if(NOT filtered_out STREQUAL "")
+      message(FATAL_ERROR "${violation_message}\n${filtered_out}")
+    endif()
   endif()
 endfunction()
+
+miso_boundary_lint(
+  "#include[[:space:]]+\"renderer/renderer.h\""
+  "Boundary violation: renderer/renderer.h is private outside the backend bridge"
+  PATHS "${SRC_DIR}/engine/include" "${SRC_DIR}/engine/src" "${SRC_DIR}/testbed" "${SRC_DIR}/main.c"
+  ALLOW_PATTERN ".*/engine/src/internal/miso__renderer_backend.c:"
+)
 
 if(LINT_CORE)
   miso_boundary_lint(
