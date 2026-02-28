@@ -52,17 +52,19 @@ set(MISO_CORE_SOURCES
     engine/src/miso_render.c
     engine/src/miso_render_diagnostics.c
     engine/src/miso_debug_ui.c
+    engine/src/miso_save.c
+    engine/src/miso_replay.c
 )
 
-#set(MISO_GAME_CAFE_SOURCES
-#    prototypes/cafe-tycoon-proto/src/sim/miso_game_cafe.c
-#)
+set(MISO_GAME_CAFE_SOURCES
+    prototypes/cafe-tycoon-proto/src/sim/miso_game_cafe.c
+)
 
 add_library(miso_core STATIC ${MISO_CORE_SOURCES})
-#add_library(miso_game_cafe STATIC ${MISO_GAME_CAFE_SOURCES})
+add_library(miso_game_cafe STATIC ${MISO_GAME_CAFE_SOURCES})
 
 miso_apply_compile_options(miso_core)
-#miso_apply_compile_options(miso_game_cafe)
+miso_apply_compile_options(miso_game_cafe)
 
 target_include_directories(miso_core
     PUBLIC
@@ -72,13 +74,13 @@ target_include_directories(miso_core
         ${CMAKE_CURRENT_SOURCE_DIR}/engine/src
 )
 
-#target_include_directories(miso_game_cafe
-#    PUBLIC
-#        ${CMAKE_CURRENT_SOURCE_DIR}/prototypes/cafe-tycoon-proto/include
-#    PRIVATE
-#        ${CMAKE_CURRENT_SOURCE_DIR}
-#        ${CMAKE_CURRENT_SOURCE_DIR}/engine/include
-#)
+target_include_directories(miso_game_cafe
+    PUBLIC
+        ${CMAKE_CURRENT_SOURCE_DIR}/prototypes/cafe-tycoon-proto/include
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${CMAKE_CURRENT_SOURCE_DIR}/engine/include
+)
 
 target_link_libraries(miso_core
     PUBLIC
@@ -87,21 +89,23 @@ target_link_libraries(miso_core
         SDL3_image::SDL3_image
 )
 
-#target_link_libraries(miso_game_cafe
-#    PUBLIC
-#        miso_core
-#)
-
-add_executable(miso main.c)
-miso_apply_compile_options(miso)
-
-target_include_directories(miso PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/engine/include
-    #${CMAKE_CURRENT_SOURCE_DIR}/prototypes/cafe-tycoon-proto/include
+target_link_libraries(miso_game_cafe
+    PUBLIC
+        miso_core
 )
 
-target_link_libraries(miso PRIVATE miso_core)
+add_executable(miso_proto_cafe
+    prototypes/cafe-tycoon-proto/src/main.c
+)
+miso_apply_compile_options(miso_proto_cafe)
+
+target_include_directories(miso_proto_cafe PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/prototypes/cafe-tycoon-proto/include
+)
+
+target_link_libraries(miso_proto_cafe PRIVATE miso_core miso_game_cafe)
 
 if(MISO_BUILD_TESTBED)
     add_executable(miso_testbed
@@ -118,13 +122,13 @@ if(MISO_BUILD_TESTBED)
 endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_link_options(miso PRIVATE -fsanitize=address,undefined -fsanitize-address-use-after-scope)
+    target_link_options(miso_proto_cafe PRIVATE -fsanitize=address,undefined -fsanitize-address-use-after-scope)
     if(TARGET miso_testbed)
         target_link_options(miso_testbed PRIVATE -fsanitize=address,undefined -fsanitize-address-use-after-scope)
     endif()
     message(STATUS "Debug build: sanitizers ON, optimization OFF, MISO_DEBUG defined")
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
-    target_link_options(miso PRIVATE -flto)
+    target_link_options(miso_proto_cafe PRIVATE -flto)
     if(TARGET miso_testbed)
         target_link_options(miso_testbed PRIVATE -flto)
     endif()
@@ -137,9 +141,9 @@ if(MISO_PGO_GENERATE)
     endif()
 
     message(STATUS "PGO Generation enabled. Instrumented binary will write profiles to: ${MISO_PGO_PROFILE_DIR}")
-    target_compile_options(miso PRIVATE -fprofile-instr-generate)
-    target_link_options(miso PRIVATE -fprofile-instr-generate)
-    target_compile_definitions(miso PRIVATE "MISO_PGO_PROFILE_DIR=\"${MISO_PGO_PROFILE_DIR}\"")
+    target_compile_options(miso_proto_cafe PRIVATE -fprofile-instr-generate)
+    target_link_options(miso_proto_cafe PRIVATE -fprofile-instr-generate)
+    target_compile_definitions(miso_proto_cafe PRIVATE "MISO_PGO_PROFILE_DIR=\"${MISO_PGO_PROFILE_DIR}\"")
 endif()
 
 if(NOT MISO_PGO_USE_PROFDATA STREQUAL "")
@@ -148,8 +152,8 @@ if(NOT MISO_PGO_USE_PROFDATA STREQUAL "")
     endif()
 
     message(STATUS "PGO Use enabled. Using profile data from: ${MISO_PGO_USE_PROFDATA}")
-    target_compile_options(miso PRIVATE -fprofile-instr-use=${MISO_PGO_USE_PROFDATA})
-    target_link_options(miso PRIVATE -fprofile-instr-use=${MISO_PGO_USE_PROFDATA})
+    target_compile_options(miso_proto_cafe PRIVATE -fprofile-instr-use=${MISO_PGO_USE_PROFDATA})
+    target_link_options(miso_proto_cafe PRIVATE -fprofile-instr-use=${MISO_PGO_USE_PROFDATA})
 endif()
 
 find_program(CLANG_FORMAT_EXE NAMES clang-format)
@@ -179,7 +183,7 @@ if(MISO_FORMAT_ON_BUILD)
     if(NOT CLANG_FORMAT_EXE)
         message(FATAL_ERROR "MISO_FORMAT_ON_BUILD=ON requires clang-format in PATH.")
     endif()
-    add_dependencies(miso format)
+    add_dependencies(miso_proto_cafe format)
 endif()
 
 find_program(RG_EXE rg)
@@ -194,7 +198,7 @@ add_custom_target(miso_boundary_lint
         -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/miso_boundary_lint.cmake
 )
 
-add_dependencies(miso miso_boundary_lint)
+add_dependencies(miso_proto_cafe miso_boundary_lint)
 if(TARGET miso_testbed)
     add_custom_target(miso_testbed_boundary_lint
         COMMAND ${CMAKE_COMMAND}
@@ -210,9 +214,10 @@ if(TARGET miso_testbed)
 endif()
 
 if(APPLE)
-    set_target_properties(miso PROPERTIES
+    set_target_properties(miso_proto_cafe PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/Info.plist"
+        OUTPUT_NAME "miso_cafe_proto"
     )
     if(TARGET miso_testbed)
         set_target_properties(miso_testbed PROPERTIES
