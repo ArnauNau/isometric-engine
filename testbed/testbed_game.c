@@ -4,8 +4,8 @@
 #include "miso_camera.h"
 #include "miso_debug_ui.h"
 #include "miso_render.h"
+#include "miso_render_diagnostics.h"
 #include "profiler.h"
-#include "renderer/renderer.h"
 #include "tilemap/tilemap.h"
 #include "vendored/nuklear/nuklear.h"
 
@@ -83,7 +83,7 @@ struct TestbedGame {
     TransformComponent transforms[MAX_BUILDINGS];
     BuildingComponent buildings[MAX_BUILDINGS];
     WireframeMesh wireframe_meshes[MAX_BUILDINGS];
-    SpriteInstance *building_instances;
+    MisoSpriteInstance *building_instances;
     int building_instances_capacity;
     float *wireframe_line_scratch;
     size_t wireframe_line_scratch_capacity_vertices;
@@ -114,24 +114,24 @@ static void testbed_nk_labelf(struct nk_context *ctx, nk_flags align, const char
     nk_label(ctx, buffer, align);
 }
 
-static const char *testbed_present_mode_name(const SDL_GPUPresentMode mode) {
+static const char *testbed_present_mode_name(const MisoRenderPresentMode mode) {
     switch (mode) {
-    case SDL_GPU_PRESENTMODE_VSYNC:
+    case MISO_RENDER_PRESENT_VSYNC:
         return "VSYNC";
-    case SDL_GPU_PRESENTMODE_MAILBOX:
+    case MISO_RENDER_PRESENT_MAILBOX:
         return "MAILBOX";
-    case SDL_GPU_PRESENTMODE_IMMEDIATE:
+    case MISO_RENDER_PRESENT_IMMEDIATE:
         return "IMMEDIATE";
     default:
         return "UNKNOWN";
     }
 }
 
-static const char *testbed_vsync_acquire_mode_name(const RendererVSyncAcquireMode mode) {
+static const char *testbed_vsync_acquire_mode_name(const MisoRenderVSyncAcquireMode mode) {
     switch (mode) {
-    case RENDERER_VSYNC_ACQUIRE_BLOCKING:
+    case MISO_RENDER_VSYNC_ACQUIRE_BLOCKING:
         return "BLOCKING";
-    case RENDERER_VSYNC_ACQUIRE_PASSTHROUGH:
+    case MISO_RENDER_VSYNC_ACQUIRE_PASSTHROUGH:
         return "PASSTHROUGH";
     default:
         return "UNKNOWN";
@@ -147,6 +147,15 @@ static float testbed_usage_percent(const uint32_t used, const uint32_t capacity)
         return 0.0f;
     }
     return ((float)used * 100.0f) / (float)capacity;
+}
+
+static const char *testbed_get_resource_path(char *const buffer, const char *const relative_path) {
+    if (!buffer || !relative_path) {
+        return NULL;
+    }
+
+    SDL_snprintf(buffer, 512, "%s../../../../%s", SDL_GetBasePath(), relative_path);
+    return buffer;
 }
 
 const char *testbed_bench_camera_state_name(const TestbedBenchCameraState state) {
@@ -310,8 +319,8 @@ static bool testbed_ensure_building_instance_capacity(TestbedGame *const game, c
         new_capacity *= 2;
     }
 
-    SpriteInstance *new_instances =
-        SDL_realloc(game->building_instances, sizeof(SpriteInstance) * (size_t)new_capacity);
+    MisoSpriteInstance *new_instances =
+        SDL_realloc(game->building_instances, sizeof(MisoSpriteInstance) * (size_t)new_capacity);
     if (!new_instances) {
         SDL_LogWarn(
             SDL_LOG_CATEGORY_RENDER, "testbed: failed to grow building instance scratch to %d", needed_instances);
@@ -538,7 +547,7 @@ static void testbed_render_buildings(TestbedGame *const game) {
     const float start_x = (float)(game->tilemap->height - 1) * iso_w / 2.0f;
     constexpr float start_y = 0.0f;
 
-    SpriteInstance *instances = game->building_instances;
+    MisoSpriteInstance *instances = game->building_instances;
     int instance_count = 0;
 
     const float tex_w = (float)(game->tilemap->tileset->columns * game->tilemap->tileset->tile_width);
@@ -566,21 +575,21 @@ static void testbed_render_buildings(TestbedGame *const game) {
 
         const float depth = 1.0f - (float)(mx + my) / (float)(game->tilemap->width + game->tilemap->height) - 0.001f;
 
-        instances[instance_count++] = (SpriteInstance){.x = iso_x,
-                                                       .y = iso_y,
-                                                       .z = depth,
-                                                       .flags = 0.0f,
-                                                       .w = (float)(bw * tile_w),
-                                                       .h = (float)(bh * tile_h),
-                                                       .tile_x = 0.0f,
-                                                       .tile_y = 0.0f,
-                                                       .u = u,
-                                                       .v = v,
-                                                       .uw = uw,
-                                                       .vh = vh};
+        instances[instance_count++] = (MisoSpriteInstance){.x = iso_x,
+                                                           .y = iso_y,
+                                                           .z = depth,
+                                                           .flags = 0.0f,
+                                                           .w = (float)(bw * tile_w),
+                                                           .h = (float)(bh * tile_h),
+                                                           .tile_x = 0.0f,
+                                                           .tile_y = 0.0f,
+                                                           .u = u,
+                                                           .v = v,
+                                                           .uw = uw,
+                                                           .vh = vh};
     }
 
-    Renderer_DrawSprites(game->tilemap->tileset->texture, instances, instance_count);
+    miso_render_diag_submit_native_sprites(game->engine, game->tilemap->tileset->texture, instances, instance_count);
 
     PROF_stop(PROFILER_RENDER_BUILDINGS);
 }
@@ -775,7 +784,7 @@ static void testbed_game_on_event(void *const ctx, const MisoEvent *const event)
         }
         case SDLK_V:
             game->vsync = !game->vsync;
-            Renderer_SetVSync(game->vsync);
+            miso_render_set_vsync(game->engine, game->vsync);
             break;
         default:
             break;
@@ -880,8 +889,12 @@ static void testbed_game_on_render_world(void *const ctx, const MisoEngine *cons
         testbed_render_tile_highlight(
             game, game->hover_tile.x, game->hover_tile.y, (SDL_FColor){0.0f, 1.0f, 1.0f, 1.0f});
 
-        Renderer_DrawTextureDebug(
-            game->tilemap->tileset->texture, 50.0f, (float)game->screen_height - 384.0f - 50.0f, 192.0f, 384.0f);
+        miso_render_diag_submit_ui_texture_debug(game->engine,
+                                                 game->tilemap->tileset->texture,
+                                                 50.0f,
+                                                 (float)game->screen_height - 384.0f - 50.0f,
+                                                 192.0f,
+                                                 384.0f);
     }
 
     if (testbed_should_render_wire(game)) {
@@ -906,8 +919,8 @@ static void testbed_game_on_render_world(void *const ctx, const MisoEngine *cons
             }
 
             if (offset_vertices > 0) {
-                Renderer_DrawLineBatch(
-                    game->wireframe_line_scratch, (int)offset_vertices, (SDL_FColor){0.0f, 1.0f, 1.0f, 1.0f});
+                miso_render_submit_world_lines(
+                    game->engine, game->wireframe_line_scratch, (int)offset_vertices, 0x00FFFFFFu);
             }
         }
         PROF_stop(PROFILER_RENDER_WIREFRAMES);
@@ -1012,7 +1025,7 @@ static void testbed_game_on_render_debug(void *const ctx, const MisoEngine *cons
         nk_slider_float(nk, 0.0f, &game->wave_phase, 1.0f, 0.005f);
 
         MisoRenderFrameStats stats = {0};
-        if (miso_render_get_frame_stats(engine, &stats)) {
+        if (miso_render_diag_get_frame_stats(engine, &stats)) {
             const MisoRenderQueueStats *queues = stats.queues;
             const MisoRenderStreamStats *streams = stats.streams;
 
@@ -1032,23 +1045,26 @@ static void testbed_game_on_render_debug(void *const ctx, const MisoEngine *cons
                               "UI text cmds/draws: %u / %u",
                               queues[MISO_RENDER_STATS_QUEUE_UI_TEXT].cmd_count,
                               queues[MISO_RENDER_STATS_QUEUE_UI_TEXT].draw_calls);
-            testbed_nk_labelf(
-                nk, NK_TEXT_LEFT, "Present mode: %s", testbed_present_mode_name(Renderer_GetPresentMode()));
-            const RendererVSyncAcquireMode vsync_acquire_mode = Renderer_GetVSyncAcquireMode();
+            testbed_nk_labelf(nk,
+                              NK_TEXT_LEFT,
+                              "Present mode: %s",
+                              testbed_present_mode_name(miso_render_diag_get_present_mode(engine)));
+            const MisoRenderVSyncAcquireMode vsync_acquire_mode = miso_render_diag_get_vsync_acquire_mode(engine);
             testbed_nk_labelf(
                 nk, NK_TEXT_LEFT, "VSYNC acquire mode: %s", testbed_vsync_acquire_mode_name(vsync_acquire_mode));
             const char *const vsync_acquire_items[] = {"BLOCKING", "PASSTHROUGH"};
-            int vsync_acquire_index =
-                vsync_acquire_mode == RENDERER_VSYNC_ACQUIRE_PASSTHROUGH ? 1 : 0;
+            int vsync_acquire_index = vsync_acquire_mode == MISO_RENDER_VSYNC_ACQUIRE_PASSTHROUGH ? 1 : 0;
             nk_layout_row_dynamic(nk, 24 * ui_s, 2);
             nk_label(nk, "Set VSYNC acquire", NK_TEXT_LEFT);
-            const int selected_vsync_acquire_index =
-                nk_combo(nk, vsync_acquire_items, 2, vsync_acquire_index, (int)(20 * ui_s), nk_vec2(150 * ui_s, 96 * ui_s));
+            const int selected_vsync_acquire_index = nk_combo(
+                nk, vsync_acquire_items, 2, vsync_acquire_index, (int)(20 * ui_s), nk_vec2(150 * ui_s, 96 * ui_s));
             if (selected_vsync_acquire_index != vsync_acquire_index) {
-                Renderer_SetVSyncAcquireMode(selected_vsync_acquire_index == 1 ? RENDERER_VSYNC_ACQUIRE_PASSTHROUGH
-                                                                                : RENDERER_VSYNC_ACQUIRE_BLOCKING);
+                miso_render_tune_set_vsync_acquire_mode(engine,
+                                                        selected_vsync_acquire_index == 1
+                                                            ? MISO_RENDER_VSYNC_ACQUIRE_PASSTHROUGH
+                                                            : MISO_RENDER_VSYNC_ACQUIRE_BLOCKING);
             }
-            const Uint32 allowed_frames_in_flight = Renderer_GetAllowedFramesInFlight();
+            const uint32_t allowed_frames_in_flight = miso_render_diag_get_allowed_frames_in_flight(engine);
             testbed_nk_labelf(nk, NK_TEXT_LEFT, "Frames in flight: %u", allowed_frames_in_flight);
             const char *const frames_in_flight_items[] = {"1", "2", "3"};
             int frames_in_flight_index = 0;
@@ -1064,7 +1080,7 @@ static void testbed_game_on_render_debug(void *const ctx, const MisoEngine *cons
                                                            (int)(20 * ui_s),
                                                            nk_vec2(90 * ui_s, 120 * ui_s));
             if (selected_frames_in_flight != frames_in_flight_index &&
-                !Renderer_SetAllowedFramesInFlight((Uint32)(selected_frames_in_flight + 1))) {
+                !miso_render_tune_set_allowed_frames_in_flight(engine, (uint32_t)(selected_frames_in_flight + 1))) {
                 SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
                             "Failed to set frames in flight to %d from debug UI",
                             selected_frames_in_flight + 1);
@@ -1324,13 +1340,12 @@ MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
         return MISO_ERR_IO;
     }
 
-    TTF_TextEngine *text_engine = Renderer_GetTextEngine();
-    if (text_engine) {
-        PROF_initUI(text_engine, game->profiler_font);
+    if (game->profiler_font) {
+        PROF_initUI(game->profiler_font);
     }
 
     char resource_path[512] = {0};
-    game->tileset = Tileset_Load(getResourcePath(resource_path, "isometric-sheet.png"), TILE_SIZE, TILE_SIZE);
+    game->tileset = Tileset_Load(testbed_get_resource_path(resource_path, "isometric-sheet.png"), TILE_SIZE, TILE_SIZE);
     if (!game->tileset) {
         testbed_game_destroy(game);
         return MISO_ERR_IO;
@@ -1352,7 +1367,7 @@ void testbed_game_destroy(TestbedGame *game) {
         return;
     }
 
-    Renderer_SetUploadSuppressed(false);
+    miso_render_tune_set_upload_suppressed(game->engine, false);
 
     for (int i = 0; i < game->building_count; i++) {
         SDL_free(game->wireframe_meshes[i].line_vertices);
@@ -1422,7 +1437,7 @@ void testbed_game_frame_end_events(TestbedGame *game) {
 void testbed_game_frame_end(const TestbedGame *const game) {
     if (game && game->engine) {
         MisoRenderFrameStats stats = {0};
-        if (miso_render_get_frame_stats(game->engine, &stats)) {
+        if (miso_render_diag_get_frame_stats(game->engine, &stats)) {
             PROF_setDuration(PROFILER_WAIT_FRAME, stats.timing.acquire_swapchain_ms);
             PROF_setDuration(PROFILER_GPU, stats.timing.submit_ms);
         }
@@ -1439,7 +1454,7 @@ void testbed_game_enable_benchmark_mode(TestbedGame *const game, const bool enab
         game->benchmark_diagnostic_mode = TESTBED_BENCH_DIAGNOSTIC_DEFAULT;
         game->benchmark_debug_ui_enabled = true;
         game->benchmark_profiler_enabled = true;
-        Renderer_SetUploadSuppressed(false);
+        miso_render_tune_set_upload_suppressed(game->engine, false);
     }
 }
 
@@ -1484,7 +1499,7 @@ void testbed_game_set_benchmark_upload_suppressed(TestbedGame *const game, const
     if (!game) {
         return;
     }
-    Renderer_SetUploadSuppressed(enabled);
+    miso_render_tune_set_upload_suppressed(game->engine, enabled);
 }
 
 void testbed_game_reset_benchmark_scene(TestbedGame *const game, const int spawn_count) {

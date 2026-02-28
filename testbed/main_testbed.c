@@ -1,7 +1,7 @@
 #include "logger.h"
 #include "miso_engine.h"
 #include "miso_render.h"
-#include "renderer/renderer.h"
+#include "miso_render_diagnostics.h"
 #include "testbed/testbed_game.h"
 
 #include <SDL3/SDL.h>
@@ -38,7 +38,7 @@
 typedef struct BenchCliOptions {
     bool bench;
     bool suite;
-    SDL_GPUPresentMode present_mode;
+    MisoRenderPresentMode present_mode;
     TestbedBenchCameraState camera_state;
     TestbedBenchDiagnosticMode diagnostic_mode;
     bool wireframe_enabled;
@@ -56,7 +56,7 @@ typedef struct BenchCliOptions {
 } BenchCliOptions;
 
 typedef struct BenchScenario {
-    SDL_GPUPresentMode present_mode;
+    MisoRenderPresentMode present_mode;
     TestbedBenchCameraState camera_state;
     TestbedBenchDiagnosticMode diagnostic_mode;
     bool wireframe_enabled;
@@ -173,47 +173,47 @@ static const char *bench_build_type_name(void) {
 #endif
 }
 
-static const char *bench_present_mode_name(const SDL_GPUPresentMode mode) {
+static const char *bench_present_mode_name(const MisoRenderPresentMode mode) {
     switch (mode) {
-    case SDL_GPU_PRESENTMODE_IMMEDIATE:
+    case MISO_RENDER_PRESENT_IMMEDIATE:
         return "IMMEDIATE";
-    case SDL_GPU_PRESENTMODE_MAILBOX:
+    case MISO_RENDER_PRESENT_MAILBOX:
         return "MAILBOX";
-    case SDL_GPU_PRESENTMODE_VSYNC:
+    case MISO_RENDER_PRESENT_VSYNC:
         return "VSYNC";
     default:
         return "UNKNOWN";
     }
 }
 
-static const char *bench_present_mode_slug(const SDL_GPUPresentMode mode) {
+static const char *bench_present_mode_slug(const MisoRenderPresentMode mode) {
     switch (mode) {
-    case SDL_GPU_PRESENTMODE_IMMEDIATE:
+    case MISO_RENDER_PRESENT_IMMEDIATE:
         return "immediate";
-    case SDL_GPU_PRESENTMODE_MAILBOX:
+    case MISO_RENDER_PRESENT_MAILBOX:
         return "mailbox";
-    case SDL_GPU_PRESENTMODE_VSYNC:
+    case MISO_RENDER_PRESENT_VSYNC:
         return "vsync";
     default:
         return "unknown";
     }
 }
 
-static bool bench_parse_present_mode(const char *const value, SDL_GPUPresentMode *const out_mode) {
+static bool bench_parse_present_mode(const char *const value, MisoRenderPresentMode *const out_mode) {
     if (!value || !out_mode) {
         return false;
     }
 
     if (SDL_strcasecmp(value, "immediate") == 0) {
-        *out_mode = SDL_GPU_PRESENTMODE_IMMEDIATE;
+        *out_mode = MISO_RENDER_PRESENT_IMMEDIATE;
         return true;
     }
     if (SDL_strcasecmp(value, "mailbox") == 0) {
-        *out_mode = SDL_GPU_PRESENTMODE_MAILBOX;
+        *out_mode = MISO_RENDER_PRESENT_MAILBOX;
         return true;
     }
     if (SDL_strcasecmp(value, "vsync") == 0) {
-        *out_mode = SDL_GPU_PRESENTMODE_VSYNC;
+        *out_mode = MISO_RENDER_PRESENT_VSYNC;
         return true;
     }
     return false;
@@ -346,7 +346,7 @@ static BenchCliOptions bench_default_cli_options(void) {
     BenchCliOptions options = {
         .bench = false,
         .suite = false,
-        .present_mode = SDL_GPU_PRESENTMODE_IMMEDIATE,
+        .present_mode = MISO_RENDER_PRESENT_IMMEDIATE,
         .camera_state = TESTBED_BENCH_CAMERA_ZOOM_IN_CENTER,
         .diagnostic_mode = TESTBED_BENCH_DIAGNOSTIC_DEFAULT,
         .wireframe_enabled = false,
@@ -1032,7 +1032,7 @@ static bool bench_run_single_scenario(MisoEngine *const engine,
     testbed_game_set_benchmark_upload_suppressed(game, false);
     testbed_game_reset_benchmark_scene(game, scenario->spawn_count);
 
-    if (!Renderer_SetAllowedFramesInFlight((Uint32)scenario->allowed_frames_in_flight)) {
+    if (!miso_render_tune_set_allowed_frames_in_flight(engine, (uint32_t)scenario->allowed_frames_in_flight)) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                      "Failed to set allowed frames in flight to %d for scenario %s",
                      scenario->allowed_frames_in_flight,
@@ -1040,7 +1040,7 @@ static bool bench_run_single_scenario(MisoEngine *const engine,
         return false;
     }
 
-    Renderer_SetPresentMode(scenario->present_mode);
+    miso_render_tune_set_present_mode(engine, scenario->present_mode);
 
     const Uint64 bench_timer_frequency = SDL_GetPerformanceFrequency();
     Uint64 warmup_start_ticks = SDL_GetPerformanceCounter();
@@ -1099,7 +1099,7 @@ static bool bench_run_single_scenario(MisoEngine *const engine,
         }
 
         MisoRenderFrameStats stats = {0};
-        if (!miso_render_get_frame_stats(engine, &stats)) {
+        if (!miso_render_diag_get_frame_stats(engine, &stats)) {
             continue;
         }
 
@@ -1262,10 +1262,10 @@ static bool bench_collect_suite_scenarios(const BenchCliOptions *const options,
     int count = 0;
 
     if (options->suite) {
-        const SDL_GPUPresentMode present_modes[] = {
-            SDL_GPU_PRESENTMODE_IMMEDIATE,
-            SDL_GPU_PRESENTMODE_MAILBOX,
-            SDL_GPU_PRESENTMODE_VSYNC,
+        const MisoRenderPresentMode present_modes[] = {
+            MISO_RENDER_PRESENT_IMMEDIATE,
+            MISO_RENDER_PRESENT_MAILBOX,
+            MISO_RENDER_PRESENT_VSYNC,
         };
         const TestbedBenchCameraState camera_states[] = {
             TESTBED_BENCH_CAMERA_ZOOM_OUT_CENTER,
