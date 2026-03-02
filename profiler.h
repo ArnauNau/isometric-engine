@@ -5,8 +5,10 @@
 #ifndef PROFILER_H
 #define PROFILER_H
 
+#include "SDL3/SDL_rect.h"
 #include "SDL3/SDL_stdinc.h"
-#include "SDL3_ttf/SDL_ttf.h"
+#include "miso_engine.h"
+#include "miso_text.h"
 
 typedef enum ProfilerSampleCategory {
     PROFILER_EVENT_HANDLING,
@@ -101,21 +103,23 @@ void PROF_getFPS(float *SDL_RESTRICT min, float *SDL_RESTRICT avg, float *SDL_RE
 /**
  * Initialize the GPU profiler rendering resources.
  * Must be called once after the renderer is initialized.
+ * @param engine The engine instance used to create retained text resources
  * @param font The font to use for profiler text
  */
-void PROF_initUI(TTF_Font *font);
+void PROF_initUI(const MisoEngine *engine, MisoFontHandle font);
 
 /**
  * Shutdown and free GPU profiler rendering resources.
  * Should be called before renderer shutdown.
  */
-void PROF_deinitUI(void);
+void PROF_deinitUI(const MisoEngine *engine);
 
 /**
  * Render the profiler using the GPU renderer.
  * Must be called between Renderer_BeginFrame() and Renderer_EndFrame().
+ * @param engine The engine instance used to render the profiler UI
  * @param position Top-left position for the profiler display
  */
-void PROF_render(SDL_FPoint position);
+void PROF_render(const MisoEngine *engine, SDL_FPoint position);
 
 #endif //PROFILER_H

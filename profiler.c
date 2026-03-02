@@ -24,10 +24,10 @@ static const char *const PROF_category_names[] = {[PROFILER_EVENT_HANDLING] = "e
 static_assert(sizeof(PROF_category_names) / sizeof(PROF_category_names[0]) == PROFILER_CATEGORY_COUNT,
               SDL_FILE ": All profiler categories must have a declared name.");
 
-#define MAX_FRAMES 60
-static constexpr float goal_frame_time = 1.0f * 1000.0f / MAX_FRAMES; // 1.0f / 70.0f = 14.2857 ms per frame
+#define TARGET_FPS 60
+static constexpr float goal_frame_time = 1.0f * 1000.0f / TARGET_FPS; // 1.0f / 70.0f = 14.2857 ms per frame
 
-#define GRAPH_COUNT 60
+#define GRAPH_COUNT 240
 
 typedef struct ProfilerCircularBuffer {
     ProfilerSample samples[GRAPH_COUNT][PROFILER_CATEGORY_COUNT];
@@ -68,7 +68,7 @@ typedef struct FramesPerSecond {
     float max;
 } FramesPerSecond_t;
 static FramesPerSecond_t frames_per_second = {.min = 1e9f, .avg = 0.0f, .max = -1e9f};
-static float fps_buffer[MAX_FRAMES] = {0};
+static float fps_buffer[GRAPH_COUNT] = {0};
 
 void calculate_FPS() {
     // Calculate FPS based on the last finished frame sample.
@@ -223,40 +223,53 @@ static inline SDL_FColor fcolor_for_section(const ProfilerSampleCategory section
 }
 
 /* ------------ GPU Profiler State ------------ */
-static TTF_Font *prof_font = nullptr;
-static TTF_TextEngine *prof_text_engine = nullptr;
-static TTF_Text *title_text = nullptr;
-static TTF_Text *prof_category_texts[PROFILER_CATEGORY_COUNT] = {nullptr};
+static MisoTextHandle title_text = 0;
+static MisoTextHandle prof_category_label_texts[PROFILER_CATEGORY_COUNT] = {0};
+static MisoTextHandle prof_category_value_texts[PROFILER_CATEGORY_COUNT] = {0};
 
-void PROF_initUI(TTF_Font *const font) {
-    prof_text_engine = UI_GetTextEngine();
-    prof_font = font;
-
-    if (!prof_text_engine || !prof_font) {
+void PROF_initUI(const MisoEngine *const engine, const MisoFontHandle font) {
+    if (!engine || font == 0) {
         return;
     }
 
-    // Pre-create TTF_Text objects for each category
-    title_text = TTF_CreateText(prof_text_engine, prof_font, "Debug Info", 0);
-    for (int i = 0; i < PROFILER_CATEGORY_COUNT; i++) {
-        prof_category_texts[i] = TTF_CreateText(prof_text_engine, prof_font, "", 0);
+    if (miso_text_create(engine, font, "Debug Info", &title_text) == MISO_OK) {
+        miso_text_set_background_enabled(engine, title_text, true);
+        miso_text_set_background_style(engine, title_text, 0x00000099u, 0.0f);
     }
-}
 
-void PROF_deinitUI(void) {
-    TTF_DestroyText(title_text);
     for (int i = 0; i < PROFILER_CATEGORY_COUNT; i++) {
-        if (prof_category_texts[i]) {
-            TTF_DestroyText(prof_category_texts[i]);
-            prof_category_texts[i] = nullptr;
+        char label_buffer[48] = {0};
+        SDL_snprintf(label_buffer, sizeof(label_buffer), "%s:", PROF_category_names[i]);
+        if (miso_text_create(engine, font, label_buffer, &prof_category_label_texts[i]) == MISO_OK) {
+            miso_text_set_background_enabled(engine, prof_category_label_texts[i], true);
+            miso_text_set_background_style(engine, prof_category_label_texts[i], 0x00000099u, 0.0f);
+        }
+
+        if (miso_text_create(engine, font, "", &prof_category_value_texts[i]) == MISO_OK) {
+            miso_text_set_background_enabled(engine, prof_category_value_texts[i], true);
+            miso_text_set_background_style(engine, prof_category_value_texts[i], 0x00000099u, 0.0f);
         }
     }
-    prof_text_engine = nullptr;
-    prof_font = nullptr;
 }
 
-void PROF_render(const SDL_FPoint position) {
-    if (!prof_text_engine || !prof_font)
+void PROF_deinitUI(const MisoEngine *const engine) {
+    if (!engine) {
+        return;
+    }
+
+    miso_text_destroy(engine, title_text);
+    title_text = 0;
+
+    for (int i = 0; i < PROFILER_CATEGORY_COUNT; i++) {
+        miso_text_destroy(engine, prof_category_label_texts[i]);
+        miso_text_destroy(engine, prof_category_value_texts[i]);
+        prof_category_label_texts[i] = 0;
+        prof_category_value_texts[i] = 0;
+    }
+}
+
+void PROF_render(const MisoEngine *const engine, const SDL_FPoint position) {
+    if (!engine || !miso_text_is_valid(engine, title_text))
         return;
 
     const int index = prof_samples.newest;
@@ -268,31 +281,39 @@ void PROF_render(const SDL_FPoint position) {
     const float text_x = position.x + (square_size * 1.5f);
     float current_y = position.y;
 
-    UI_TextWithBackground(title_text, position.x, current_y);
+    miso_render_submit_ui_text_handle(engine, title_text, position.x, current_y, 0xFFFFFFFFu);
     current_y += line_height + 16.0f;
 
     for (ProfilerSampleCategory category = 0; category < PROFILER_CATEGORY_COUNT; category++) {
-        // Update text content
         if (category == PROFILER_FRAME_TOTAL) {
-            snprintf(text_buffer,
-                     sizeof(text_buffer),
-                     "%s: %6.2f | %6.2f (ms)",
-                     PROF_category_names[category],
-                     prof_samples.samples[index][category].duration_ms,
-                     goal_frame_time);
+            SDL_snprintf(text_buffer,
+                         sizeof(text_buffer),
+                         "%6.2f | %6.2f (ms)",
+                         prof_samples.samples[index][category].duration_ms,
+                         goal_frame_time);
         } else {
-            snprintf(text_buffer,
-                     sizeof(text_buffer),
-                     "%s: %6.2f ms",
-                     PROF_category_names[category],
-                     prof_samples.samples[index][category].duration_ms);
+            SDL_snprintf(
+                text_buffer, sizeof(text_buffer), "%6.2f ms", prof_samples.samples[index][category].duration_ms);
         }
-        TTF_SetTextString(prof_category_texts[category], text_buffer, 0);
 
-        // Queue text to be drawn
-        UI_TextWithBackground(prof_category_texts[category], text_x, current_y - 4.0f);
+        const MisoTextHandle label_handle = prof_category_label_texts[category];
+        const MisoTextHandle value_handle = prof_category_value_texts[category];
+        if (!miso_text_is_valid(engine, label_handle) || !miso_text_is_valid(engine, value_handle)) {
+            current_y += line_height + 8.0f;
+            continue;
+        }
 
-        // Draw color square (except for FRAME_TOTAL)
+        (void)miso_text_set_string(engine, value_handle, text_buffer);
+
+        MisoTextMetrics label_metrics = {0};
+        if (!miso_text_get_metrics(engine, label_handle, &label_metrics)) {
+            label_metrics.width = 0.0f;
+        }
+
+        miso_render_submit_ui_text_handle(engine, label_handle, text_x, current_y - 4.0f, 0xFFFFFFFFu);
+        miso_render_submit_ui_text_handle(
+            engine, value_handle, text_x + label_metrics.width + 8.0f, current_y - 4.0f, 0xFFFFFFFFu);
+
         if (category != PROFILER_FRAME_TOTAL) {
             const SDL_FColor color = fcolor_for_section(category);
             UI_FillRect(position.x, current_y + 2.0f, square_size, square_size, color);
