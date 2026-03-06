@@ -14,6 +14,7 @@ SDL_GPUTexture *Renderer_GetSwapchainTexture(void);
 // Render pass management for external rendering
 // Call EndRenderPass before external GPU rendering, ResumeRenderPass after
 void Renderer_EndRenderPass(void);
+[[deprecated("No-op with queued renderer architecture.")]]
 void Renderer_ResumeRenderPass(void);
 
 #endif // RENDERER_INTERNAL_H

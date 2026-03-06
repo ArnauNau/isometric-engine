@@ -68,6 +68,5 @@ typedef struct {
 } UIBatchStats;
 
 UIBatchStats UI_GetStats(void);
-TTF_TextEngine *UI_GetTextEngine(void);
 
 #endif // MISO_UI_H

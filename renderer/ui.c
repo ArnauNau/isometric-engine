@@ -308,7 +308,3 @@ void UI_Flush(void) {
 UIBatchStats UI_GetStats(void) {
     return g_last_stats;
 }
-
-TTF_TextEngine *UI_GetTextEngine(void) {
-    return Renderer_GetTextEngine();
-}

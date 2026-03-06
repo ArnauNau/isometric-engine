@@ -182,7 +182,7 @@ static SDL_GPUShader *LoadShader(SDL_GPUDevice *const device,
                                  const int num_samplers,
                                  const int num_uniform_buffers,
                                  const int num_storage_buffers,
-                                 int num_storage_textures,
+                                 const int num_storage_textures,
                                  const SDL_GPUShaderStage stage) {
     size_t code_size = 0;
     void *const code = SDL_LoadFile(path, &code_size);
@@ -1071,8 +1071,10 @@ bool Renderer_SetAllowedFramesInFlight(const Uint32 allowed_frames_in_flight) {
     }
 
     if (!SDL_SetGPUAllowedFramesInFlight(gpu_device, allowed_frames_in_flight)) {
-        SDL_LogError(
-            SDL_LOG_CATEGORY_GPU, "Failed to set allowed frames in flight (%u): %s", allowed_frames_in_flight, SDL_GetError());
+        SDL_LogError(SDL_LOG_CATEGORY_GPU,
+                     "Failed to set allowed frames in flight (%u): %s",
+                     allowed_frames_in_flight,
+                     SDL_GetError());
         return false;
     }
 
@@ -1199,10 +1201,10 @@ void Renderer_BeginFrame(void) {
     const Uint64 acquire_start = SDL_GetPerformanceCounter();
     const bool blocking_acquire =
         g_present_mode == SDL_GPU_PRESENTMODE_VSYNC && g_vsync_acquire_mode == RENDERER_VSYNC_ACQUIRE_BLOCKING;
-    const bool got_swapchain = blocking_acquire
-                                   ? SDL_WaitAndAcquireGPUSwapchainTexture(
-                                         cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr)
-                                   : SDL_AcquireGPUSwapchainTexture(cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr);
+    const bool got_swapchain =
+        blocking_acquire
+            ? SDL_WaitAndAcquireGPUSwapchainTexture(cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr)
+            : SDL_AcquireGPUSwapchainTexture(cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr);
     const Uint64 acquire_end = SDL_GetPerformanceCounter();
     g_frame_stats.timing.acquire_swapchain_ms = renderer_elapsed_ms(acquire_start, acquire_end);
 
