@@ -1,6 +1,7 @@
 #include "miso_render.h"
 
 #include "internal/miso__engine_internal.h"
+#include "internal/miso__render_text_internal.h"
 #include "internal/miso__renderer_backend.h"
 
 #include <SDL3/SDL.h>
@@ -133,6 +134,8 @@ void miso_render_destroy_font(const MisoEngine *const engine, const MisoFontHand
         return;
     }
 
+    miso__text_on_font_destroyed(font);
+
     if (g_font_table[font].text) {
         TTF_DestroyText(g_font_table[font].text);
     }
@@ -258,6 +261,8 @@ void miso_render_end_ui(const MisoEngine *engine) {
 }
 
 void miso__render_shutdown(void) {
+    miso__text_shutdown();
+
     for (uint32_t i = 1; i < MISO_TEXTURE_TABLE_MAX; i++) {
         if (g_texture_table[i]) {
             miso__renderer_destroy_texture(g_texture_table[i]);
@@ -279,4 +284,12 @@ void miso__render_shutdown(void) {
     SDL_free(g_world_geometry_scratch);
     g_world_geometry_scratch = nullptr;
     g_world_geometry_scratch_capacity = 0;
+}
+
+TTF_Font *miso__render_get_font_ptr(const MisoFontHandle font) {
+    if (font == 0 || font >= MISO_FONT_TABLE_MAX || !g_font_table[font].font) {
+        return NULL;
+    }
+
+    return g_font_table[font].font;
 }

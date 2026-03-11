@@ -51,6 +51,7 @@ set(MISO_CORE_SOURCES
     engine/src/miso_buildings.c
     engine/src/miso_render.c
     engine/src/miso_render_diagnostics.c
+    engine/src/miso_text.c
     engine/src/miso_debug_ui.c
     engine/src/miso_save.c
     engine/src/miso_replay.c
