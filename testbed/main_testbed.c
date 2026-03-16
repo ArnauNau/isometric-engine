@@ -17,9 +17,9 @@
 
 #define BENCH_SCHEMA_VERSION "1"
 #define BENCH_DEFAULT_OUTPUT_DIR "bench"
-#define BENCH_DEFAULT_WARMUP_S 2.0f
-#define BENCH_DEFAULT_SAMPLE_S 10.0f
-#define BENCH_DEFAULT_REPETITIONS 3
+#define BENCH_DEFAULT_WARMUP_S 3.0f
+#define BENCH_DEFAULT_SAMPLE_S 5.0f
+#define BENCH_DEFAULT_REPETITIONS 1
 #define BENCH_DEFAULT_ALLOWED_FRAMES_IN_FLIGHT 1
 #define BENCH_BASELINE_SPAWN_COUNT 256
 #define BENCH_STRESS_SPAWN_COUNT 512
@@ -321,6 +321,7 @@ static bool bench_parse_float(const char *const value, float *const out_value) {
 static void bench_print_usage(const char *const argv0) {
     SDL_Log("Usage: %s [--bench] [options]", argv0);
     SDL_Log("Benchmark options:");
+    SDL_Log("  Defaults for `--bench` with no extra flags: quick single-scenario run with debug UI/profiler enabled");
     SDL_Log("  --bench                       Enable benchmark mode");
     SDL_Log("  --bench-suite                 Run full suite: 3 present x 3 camera x 2 wire = 18 scenarios");
     SDL_Log("  --present-mode <mode>         immediate|mailbox|vsync");
@@ -346,12 +347,12 @@ static BenchCliOptions bench_default_cli_options(void) {
     BenchCliOptions options = {
         .bench = false,
         .suite = false,
-        .present_mode = MISO_RENDER_PRESENT_IMMEDIATE,
+        .present_mode = MISO_RENDER_PRESENT_VSYNC,
         .camera_state = TESTBED_BENCH_CAMERA_ZOOM_IN_CENTER,
         .diagnostic_mode = TESTBED_BENCH_DIAGNOSTIC_DEFAULT,
         .wireframe_enabled = false,
-        .debug_ui_enabled = false,
-        .profiler_enabled = false,
+        .debug_ui_enabled = true,
+        .profiler_enabled = true,
         .spawn_count = BENCH_BASELINE_SPAWN_COUNT,
         .warmup_s = BENCH_DEFAULT_WARMUP_S,
         .sample_s = BENCH_DEFAULT_SAMPLE_S,
@@ -821,7 +822,8 @@ static void bench_scenario_make_name(BenchScenario *const scenario) {
                  scenario->spawn_count);
 }
 
-static bool bench_setup_runtime(MisoEngine **const out_engine, TestbedGame **const out_game) {
+static bool
+bench_setup_runtime(MisoEngine **const out_engine, TestbedGame **const out_game, const bool benchmark_runtime) {
     if (!out_engine || !out_game) {
         return false;
     }
@@ -833,7 +835,7 @@ static bool bench_setup_runtime(MisoEngine **const out_engine, TestbedGame **con
         .window_width = 1920,
         .window_height = 1080,
         .window_title = "miso testbed",
-        .enable_vsync = true,
+        .enable_vsync = !benchmark_runtime,
         .sim_tick_hz = 20,
         .max_sim_steps_per_frame = 8,
     };
@@ -891,6 +893,8 @@ static bool bench_write_run_summary_json(const BenchScenario *const scenario,
     fprintf(json_file, "  \"present_mode\": \"%s\",\n", bench_present_mode_name(scenario->present_mode));
     fprintf(json_file, "  \"camera_state\": \"%s\",\n", testbed_bench_camera_state_name(scenario->camera_state));
     fprintf(json_file, "  \"wireframe_enabled\": %s,\n", scenario->wireframe_enabled ? "true" : "false");
+    fprintf(json_file, "  \"debug_ui_enabled\": %s,\n", scenario->debug_ui_enabled ? "true" : "false");
+    fprintf(json_file, "  \"profiler_enabled\": %s,\n", scenario->profiler_enabled ? "true" : "false");
     fprintf(
         json_file, "  \"diagnostic_mode\": \"%s\",\n", testbed_bench_diagnostic_mode_name(scenario->diagnostic_mode));
     fprintf(json_file, "  \"allowed_frames_in_flight\": %d,\n", scenario->allowed_frames_in_flight);
@@ -1571,6 +1575,8 @@ static bool bench_write_suite_summary_json(const char *const suite_dir,
                 "      \"camera_state\": \"%s\",\n",
                 testbed_bench_camera_state_name(entry->scenario.camera_state));
         fprintf(json_file, "      \"wireframe_enabled\": %s,\n", entry->scenario.wireframe_enabled ? "true" : "false");
+        fprintf(json_file, "      \"debug_ui_enabled\": %s,\n", entry->scenario.debug_ui_enabled ? "true" : "false");
+        fprintf(json_file, "      \"profiler_enabled\": %s,\n", entry->scenario.profiler_enabled ? "true" : "false");
         fprintf(json_file,
                 "      \"diagnostic_mode\": \"%s\",\n",
                 testbed_bench_diagnostic_mode_name(entry->scenario.diagnostic_mode));
@@ -1693,7 +1699,7 @@ static int bench_run_suite(const BenchCliOptions *const options) {
 
     MisoEngine *engine = NULL;
     TestbedGame *game = NULL;
-    if (!bench_setup_runtime(&engine, &game)) {
+    if (!bench_setup_runtime(&engine, &game, true)) {
         return 1;
     }
 
@@ -1809,7 +1815,7 @@ static int run_interactive(void) {
 
     MisoEngine *engine = NULL;
     TestbedGame *game = NULL;
-    if (!bench_setup_runtime(&engine, &game)) {
+    if (!bench_setup_runtime(&engine, &game, false)) {
         return 1;
     }
 
@@ -1853,6 +1859,13 @@ int main(int argc, char **argv) {
     SDL_Log("Benchmark mode enabled");
     SDL_Log("Build type: %s", bench_build_type_name());
     SDL_Log("Output dir: %s", options.output_dir);
+    SDL_Log("Scenario defaults: present=%s camera=%s wireframe=%s diagnostic=%s debug_ui=%s profiler=%s",
+            bench_present_mode_name(options.present_mode),
+            testbed_bench_camera_state_name(options.camera_state),
+            options.wireframe_enabled ? "on" : "off",
+            testbed_bench_diagnostic_mode_name(options.diagnostic_mode),
+            options.debug_ui_enabled ? "on" : "off",
+            options.profiler_enabled ? "on" : "off");
     SDL_Log("Allowed frames in flight: %d", options.allowed_frames_in_flight);
     SDL_Log("Warmup: %.2fs | Sample: %.2fs | Repetitions: %d", options.warmup_s, options.sample_s, options.repetitions);
 

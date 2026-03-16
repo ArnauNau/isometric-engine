@@ -5,12 +5,12 @@
 #include "miso_debug_ui.h"
 #include "miso_render.h"
 #include "miso_render_diagnostics.h"
+#include "miso_text.h"
 #include "profiler.h"
 #include "tilemap/tilemap.h"
 #include "vendored/nuklear/nuklear.h"
 
 #include <SDL3/SDL.h>
-#include <SDL3_ttf/SDL_ttf.h>
 #include <stdarg.h>
 #include <stddef.h>
 
@@ -20,6 +20,7 @@
 #define MAP_SIZE_X 70
 #define MAP_SIZE_Y 50
 #define MAX_BUILDINGS 512
+#define TESTBED_HUD_TEXT_COUNT 4
 
 typedef enum TileType_ {
     TILE_PLACEHOLDER_BUILDING = 48,
@@ -88,8 +89,8 @@ struct TestbedGame {
     float *wireframe_line_scratch;
     size_t wireframe_line_scratch_capacity_vertices;
 
-    TTF_Font *profiler_font;
     MisoFontHandle hud_font;
+    MisoTextHandle hud_texts[TESTBED_HUD_TEXT_COUNT];
 
     bool benchmark_mode;
     bool benchmark_debug_ui_enabled;
@@ -147,6 +148,18 @@ static float testbed_usage_percent(const uint32_t used, const uint32_t capacity)
         return 0.0f;
     }
     return ((float)used * 100.0f) / (float)capacity;
+}
+
+static void testbed_sync_benchmark_debug_mode(TestbedGame *const game) {
+    if (!game) {
+        return;
+    }
+
+    if (!game->benchmark_mode) {
+        return;
+    }
+
+    game->debug_mode = game->benchmark_debug_ui_enabled || game->benchmark_profiler_enabled;
 }
 
 static const char *testbed_get_resource_path(char *const buffer, const char *const relative_path) {
@@ -854,20 +867,35 @@ static void testbed_game_on_sim_tick(void *const ctx, const float fixed_dt_secon
     (void)fixed_dt_seconds;
 }
 
-static void testbed_render_hud_line(TestbedGame *game, const float x, const float y, const char *const text) {
+static void
+testbed_render_hud_line(TestbedGame *game, const int slot, const float x, const float y, const char *const text) {
     if (!game || !text ||
         !testbed_is_point_in_rect(x, y, &(SDL_FRect){0, 0, (float)game->screen_width, (float)game->screen_height})) {
+        return;
+    }
+    if (slot < 0 || slot >= TESTBED_HUD_TEXT_COUNT) {
         return;
     }
 
     constexpr float pad_x = 6.0f;
     constexpr float pad_y = 4.0f;
     constexpr float line_h = 28.0f;
-    constexpr float estimate_char_w = 9.0f;
-    const float box_w = estimate_char_w * (float)SDL_strlen(text) + pad_x * 2.0f;
+    const MisoTextHandle text_handle = game->hud_texts[slot];
+    if (!miso_text_is_valid(game->engine, text_handle)) {
+        return;
+    }
 
-    miso_render_submit_ui_rect(game->engine, x, y, box_w, line_h, 0x000000AAu);
-    miso_render_submit_ui_text(game->engine, game->hud_font, text, x + pad_x, y + pad_y, 0xFFFFFFFFu);
+    (void)miso_text_set_string(game->engine, text_handle, text);
+    MisoTextMetrics metrics = {0};
+    if (!miso_text_get_metrics(game->engine, text_handle, &metrics)) {
+        metrics.width = 0.0f;
+        metrics.height = 0.0f;
+    }
+    const float box_w = metrics.width + pad_x * 2.0f;
+    const float box_h = SDL_max(line_h, metrics.height + pad_y * 2.0f);
+
+    miso_render_submit_ui_rect(game->engine, x, y, box_w, box_h, 0x000000AAu);
+    miso_render_submit_ui_text_handle(game->engine, text_handle, x + pad_x, y + pad_y, 0xFFFFFFFFu);
 }
 
 static void testbed_game_on_render_world(void *const ctx, const MisoEngine *const engine) {
@@ -942,7 +970,7 @@ static void testbed_game_on_render_ui(void *const ctx, const MisoEngine *const e
 
     char hover_tile_info[64];
     SDL_snprintf(hover_tile_info, sizeof(hover_tile_info), "Tile: (%d, %d)", game->hover_tile.x, game->hover_tile.y);
-    testbed_render_hud_line(game, 10.0f, ui_y_pos, hover_tile_info);
+    testbed_render_hud_line(game, 0, 10.0f, ui_y_pos, hover_tile_info);
     ui_y_pos += 34.0f;
 
     char camera_info[128];
@@ -952,7 +980,7 @@ static void testbed_game_on_render_ui(void *const ctx, const MisoEngine *const e
                  game->camera_x,
                  game->camera_y,
                  game->camera_zoom);
-    testbed_render_hud_line(game, 10.0f, ui_y_pos, camera_info);
+    testbed_render_hud_line(game, 1, 10.0f, ui_y_pos, camera_info);
     ui_y_pos += 34.0f;
 
     char fps_str[128];
@@ -966,16 +994,16 @@ static void testbed_game_on_render_ui(void *const ctx, const MisoEngine *const e
         const float fps = game->frame_dt > 0.0f ? (1.0f / game->frame_dt) : 0.0f;
         SDL_snprintf(fps_str, sizeof(fps_str), "FPS %4.0f", fps);
     }
-    testbed_render_hud_line(game, 10.0f, ui_y_pos, fps_str);
+    testbed_render_hud_line(game, 2, 10.0f, ui_y_pos, fps_str);
     ui_y_pos += 34.0f;
 
     if (game->debug_mode && (!game->benchmark_mode || game->benchmark_profiler_enabled)) {
-        PROF_render((SDL_FPoint){10.0f, ui_y_pos});
+        PROF_render(game->engine, (SDL_FPoint){10.0f, ui_y_pos});
     }
 
     char mouse_pos_info[64];
     SDL_snprintf(mouse_pos_info, sizeof(mouse_pos_info), "%.1f, %.1f", game->mouse_x, game->mouse_y);
-    testbed_render_hud_line(game, game->mouse_x + 15.0f, game->mouse_y + 15.0f, mouse_pos_info);
+    testbed_render_hud_line(game, 3, game->mouse_x + 15.0f, game->mouse_y + 15.0f, mouse_pos_info);
 
     miso_render_end_ui(engine);
     PROF_stop(PROFILER_RENDER_UI);
@@ -1332,17 +1360,20 @@ MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
         return font_result;
     }
 
-    game->profiler_font = TTF_OpenFont("/Users/arnau/Library/Fonts/JetBrainsMono-Regular.ttf", 24.0f);
-    if (!game->profiler_font) {
-        miso_render_destroy_font(engine, game->hud_font);
-        miso_debug_ui_shutdown();
-        SDL_free(game);
-        return MISO_ERR_IO;
+    for (int i = 0; i < TESTBED_HUD_TEXT_COUNT; i++) {
+        if (miso_text_create(engine, game->hud_font, "", &game->hud_texts[i]) != MISO_OK) {
+            for (int j = 0; j < i; j++) {
+                miso_text_destroy(engine, game->hud_texts[j]);
+                game->hud_texts[j] = 0;
+            }
+            miso_render_destroy_font(engine, game->hud_font);
+            miso_debug_ui_shutdown();
+            SDL_free(game);
+            return MISO_ERR_OUT_OF_MEMORY;
+        }
     }
 
-    if (game->profiler_font) {
-        PROF_initUI(game->profiler_font);
-    }
+    PROF_initUI(engine, game->hud_font);
 
     char resource_path[512] = {0};
     game->tileset = Tileset_Load(testbed_get_resource_path(resource_path, "isometric-sheet.png"), TILE_SIZE, TILE_SIZE);
@@ -1390,9 +1421,10 @@ void testbed_game_destroy(TestbedGame *game) {
         Tileset_Destroy(game->tileset);
     }
 
-    PROF_deinitUI();
-    if (game->profiler_font) {
-        TTF_CloseFont(game->profiler_font);
+    PROF_deinitUI(game->engine);
+    for (int i = 0; i < TESTBED_HUD_TEXT_COUNT; i++) {
+        miso_text_destroy(game->engine, game->hud_texts[i]);
+        game->hud_texts[i] = 0;
     }
 
     miso_render_destroy_font(game->engine, game->hud_font);
@@ -1454,8 +1486,12 @@ void testbed_game_enable_benchmark_mode(TestbedGame *const game, const bool enab
         game->benchmark_diagnostic_mode = TESTBED_BENCH_DIAGNOSTIC_DEFAULT;
         game->benchmark_debug_ui_enabled = true;
         game->benchmark_profiler_enabled = true;
+        game->debug_mode = false;
         miso_render_tune_set_upload_suppressed(game->engine, false);
+        return;
     }
+
+    testbed_sync_benchmark_debug_mode(game);
 }
 
 void testbed_game_set_benchmark_debug_ui(TestbedGame *const game, const bool enabled) {
@@ -1463,6 +1499,7 @@ void testbed_game_set_benchmark_debug_ui(TestbedGame *const game, const bool ena
         return;
     }
     game->benchmark_debug_ui_enabled = enabled;
+    testbed_sync_benchmark_debug_mode(game);
 }
 
 void testbed_game_set_benchmark_profiler(TestbedGame *const game, const bool enabled) {
@@ -1470,7 +1507,7 @@ void testbed_game_set_benchmark_profiler(TestbedGame *const game, const bool ena
         return;
     }
     game->benchmark_profiler_enabled = enabled;
-    game->debug_mode = enabled;
+    testbed_sync_benchmark_debug_mode(game);
 }
 
 void testbed_game_set_benchmark_wireframe(TestbedGame *const game, const bool enabled) {
