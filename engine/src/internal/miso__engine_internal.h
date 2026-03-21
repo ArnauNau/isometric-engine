@@ -20,6 +20,9 @@ struct MisoEngine {
     SDL_Window *window;
     bool running;
 
+    char data_root[MISO_PATH_MAX];
+    bool has_data_root;
+
     uint64_t perf_frequency;
     uint64_t last_counter;
     float real_dt_seconds;

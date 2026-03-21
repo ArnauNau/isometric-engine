@@ -55,6 +55,7 @@ set(MISO_CORE_SOURCES
     engine/src/miso_debug_ui.c
     engine/src/miso_save.c
     engine/src/miso_replay.c
+    engine/src/internal/miso__paths.c
 )
 
 set(MISO_GAME_CAFE_SOURCES

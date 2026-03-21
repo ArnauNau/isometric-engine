@@ -4,6 +4,7 @@
 #include "miso_events.h"
 
 #define MISO_VERSION "0.1.0"
+#define MISO_PATH_MAX 1024U
 
 #include <stddef.h>
 #include <stdint.h>
@@ -15,6 +16,7 @@ typedef struct MisoConfig {
     int window_height;
     const char *window_title;
     bool enable_vsync;
+    const char *data_root; /* If NULL, engine auto-resolves from the executable base path. */
     int sim_tick_hz;
     int max_sim_steps_per_frame;
 } MisoConfig;
@@ -56,6 +58,8 @@ bool miso_begin_frame(MisoEngine *engine);
 void miso_end_frame(MisoEngine *engine);
 void miso_get_window_size_pixels(const MisoEngine *engine, int *out_width, int *out_height);
 float miso_get_window_pixel_density(const MisoEngine *engine);
+bool miso_resolve_asset_path(const MisoEngine *engine, const char *path, char *out_path, size_t out_path_size);
+const char *miso_get_data_root(const MisoEngine *engine);
 
 void miso_run_simulation_ticks(MisoEngine *engine, MisoSimTickFn tick_fn, void *user);
 float miso_get_real_delta_seconds(const MisoEngine *engine);

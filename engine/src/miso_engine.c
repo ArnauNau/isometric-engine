@@ -1,6 +1,7 @@
 #include "miso_engine.h"
 
 #include "internal/miso__engine_internal.h"
+#include "internal/miso__paths.h"
 #include "internal/miso__renderer_backend.h"
 #include "logger.h"
 #include "miso_events.h"
@@ -16,6 +17,7 @@ static MisoConfig miso__default_config(void) {
         .window_width = 1280,
         .window_height = 720,
         .window_title = "miso",
+        .data_root = nullptr,
         .enable_vsync = true,
         .sim_tick_hz = 20,
         .max_sim_steps_per_frame = 8,
@@ -111,17 +113,6 @@ MisoResult miso_create(const MisoConfig *cfg, MisoEngine **out_engine) {
         return MISO_ERR_OUT_OF_MEMORY;
     }
 
-    engine->config = cfg ? *cfg : miso__default_config();
-    if (engine->config.sim_tick_hz <= 0) {
-        engine->config.sim_tick_hz = 20;
-    }
-    if (engine->config.max_sim_steps_per_frame <= 0) {
-        engine->config.max_sim_steps_per_frame = 8;
-    }
-    if (!engine->config.window_title) {
-        engine->config.window_title = "miso";
-    }
-
     LOG_init();
     SDL_SetLogPriorities(SDL_LOG_PRIORITY_VERBOSE);
 #ifdef MISO_DEBUG
@@ -133,6 +124,23 @@ MisoResult miso_create(const MisoConfig *cfg, MisoEngine **out_engine) {
     if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_EVENTS)) {
         SDL_free(engine);
         return MISO_ERR_INIT;
+    }
+
+    engine->config = cfg ? *cfg : miso__default_config();
+    if (engine->config.sim_tick_hz <= 0) {
+        engine->config.sim_tick_hz = 20;
+    }
+    if (engine->config.max_sim_steps_per_frame <= 0) {
+        engine->config.max_sim_steps_per_frame = 8;
+    }
+    if (!engine->config.window_title) {
+        engine->config.window_title = "miso";
+    }
+    if (miso__resolve_data_root(&engine->config, engine->data_root, sizeof(engine->data_root))) {
+        engine->has_data_root = true;
+        SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "miso data root: %s", engine->data_root);
+    } else {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "miso data root could not be resolved");
     }
 
     engine->window = SDL_CreateWindow(engine->config.window_title,
