@@ -328,8 +328,12 @@ NK_API struct nk_context *nk_sdl_gpu_init(SDL_Window *const win, SDL_GPUDevice *
     nk_buffer_init(&sdl->gpu.cmds, &sdl->allocator, NK_BUFFER_DEFAULT_INITIAL_SIZE);
 
     /* Load shaders */
-    char shader_path[512] = {0};
-    getResourcePath(shader_path, "shaders/nuklear.metal");
+    const char *const shader_path = Renderer_GetNuklearShaderPath();
+    if (!shader_path) {
+        SDL_Log("nuklear: Shader path not configured");
+        SDL_free(sdl);
+        return nullptr;
+    }
 
     SDL_GPUShader *const vs =
         nk_sdl_gpu_load_shader(device, shader_path, "vertex_nuklear", 0, 1, SDL_GPU_SHADERSTAGE_VERTEX);

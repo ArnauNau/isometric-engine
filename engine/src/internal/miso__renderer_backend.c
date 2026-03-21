@@ -1,5 +1,6 @@
 #include "miso__renderer_backend.h"
 
+#include "miso__paths.h"
 #include "renderer/renderer.h"
 #include "renderer/renderer_internal.h"
 #include "renderer/ui.h"
@@ -7,8 +8,27 @@
 _Static_assert(sizeof(MisoRendererFrameStatsSnapshot) == sizeof(RendererFrameStats),
                "MisoRendererFrameStatsSnapshot must match RendererFrameStats layout");
 
-bool miso__renderer_init(SDL_Window *window) {
-    return Renderer_Init(window);
+bool miso__renderer_init(const MisoEngine *const engine, SDL_Window *const window) {
+    char sprite_shader_path[MISO_PATH_MAX];
+    char geometry_shader_path[MISO_PATH_MAX];
+    char ui_shader_path[MISO_PATH_MAX];
+    char nuklear_shader_path[MISO_PATH_MAX];
+
+    if (!miso__resolve_asset_path(engine, "shaders/sprite.metal", sprite_shader_path, sizeof(sprite_shader_path)) ||
+        !miso__resolve_asset_path(
+            engine, "shaders/geometry.metal", geometry_shader_path, sizeof(geometry_shader_path)) ||
+        !miso__resolve_asset_path(engine, "shaders/ui.metal", ui_shader_path, sizeof(ui_shader_path)) ||
+        !miso__resolve_asset_path(engine, "shaders/nuklear.metal", nuklear_shader_path, sizeof(nuklear_shader_path))) {
+        return false;
+    }
+
+    const RendererConfig config = {
+        .sprite_shader_path = sprite_shader_path,
+        .geometry_shader_path = geometry_shader_path,
+        .ui_shader_path = ui_shader_path,
+        .nuklear_shader_path = nuklear_shader_path,
+    };
+    return Renderer_Init(window, &config);
 }
 
 void miso__renderer_shutdown(void) {

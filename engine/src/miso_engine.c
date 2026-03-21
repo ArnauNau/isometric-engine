@@ -153,7 +153,7 @@ MisoResult miso_create(const MisoConfig *cfg, MisoEngine **out_engine) {
         return MISO_ERR_INIT;
     }
 
-    if (!miso__renderer_init(engine->window)) {
+    if (!miso__renderer_init(engine, engine->window)) {
         SDL_DestroyWindow(engine->window);
         SDL_Quit();
         SDL_free(engine);

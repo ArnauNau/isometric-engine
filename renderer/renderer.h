@@ -7,11 +7,12 @@
 
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
-
-//TODO: change way to get path, quick hack to be able to launch from different working directories
-#define RESOURCE_PATH_STRING(out, in) sprintf(out, "%s../../../../%s", SDL_GetBasePath(), in)
-
-const char *getResourcePath(char *string, const char *relative_path);
+typedef struct RendererConfig {
+    const char *sprite_shader_path;
+    const char *geometry_shader_path;
+    const char *ui_shader_path;
+    const char *nuklear_shader_path;
+} RendererConfig;
 
 /**
  * @brief Sprite instance data for GPU-batched rendering.
@@ -105,7 +106,8 @@ typedef struct RendererFrameStats {
     RendererStreamStats streams[RENDERER_STATS_STREAM_COUNT];
 } RendererFrameStats;
 
-bool Renderer_Init(SDL_Window *window);
+bool Renderer_Init(SDL_Window *window, const RendererConfig *config);
+const char *Renderer_GetNuklearShaderPath(void);
 void Renderer_Shutdown(void);
 void Renderer_Resize(int width, int height);
 void Renderer_SetVSync(bool enabled);

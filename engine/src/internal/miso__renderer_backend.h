@@ -1,6 +1,8 @@
 #ifndef MISO__RENDERER_BACKEND_H
 #define MISO__RENDERER_BACKEND_H
 
+#include "miso_engine.h"
+
 #include <SDL3/SDL.h>
 #include <SDL3_ttf/SDL_ttf.h>
 #include <stdbool.h>
@@ -46,7 +48,7 @@ typedef struct MisoRendererFrameStatsSnapshot {
     } streams[6];
 } MisoRendererFrameStatsSnapshot;
 
-bool miso__renderer_init(SDL_Window *window);
+bool miso__renderer_init(const MisoEngine *engine, SDL_Window *window);
 void miso__renderer_shutdown(void);
 void miso__renderer_resize(int width, int height);
 void miso__renderer_set_vsync(bool enabled);

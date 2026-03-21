@@ -7,13 +7,9 @@
 #include <stdint.h>
 #include <string.h>
 
-const char *getResourcePath(char *const string, const char *const relative_path) {
-    SDL_snprintf(string, 512, "%s../../../../%s", SDL_GetBasePath(), relative_path);
-    return string;
-}
-
 static SDL_GPUDevice *gpu_device = nullptr;
 static SDL_Window *render_window = nullptr;
+static char *g_nuklear_shader_path = nullptr;
 static SDL_GPUSampler *sampler = nullptr;
 
 static SDL_GPUGraphicsPipeline *sprite_pipeline = nullptr;
@@ -30,7 +26,7 @@ static SDL_GPUPresentMode g_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
 static RendererVSyncAcquireMode g_vsync_acquire_mode = RENDERER_VSYNC_ACQUIRE_BLOCKING;
 static bool g_upload_suppressed = false;
 
-//triple-buffered upload streams (independent from swapchain pacing)
+//triple-buffered upload streams (independent of swapchain pacing)
 #define RENDERER_STREAM_FRAMES_IN_FLIGHT 3U
 // 1 -> fresh frames by limiting in-flight queue depth
 #define RENDERER_DEFAULT_ALLOWED_FRAMES_IN_FLIGHT 1U
@@ -604,8 +600,19 @@ static void CreateDepthTexture(const Uint32 width, const Uint32 height) {
     depth_texture = SDL_CreateGPUTexture(gpu_device, &depth_info);
 }
 
-bool Renderer_Init(SDL_Window *const window) {
+bool Renderer_Init(SDL_Window *const window, const RendererConfig *const config) {
+    if (!config || !config->sprite_shader_path || !config->geometry_shader_path || !config->ui_shader_path ||
+        !config->nuklear_shader_path) {
+        SDL_LogError(SDL_LOG_CATEGORY_GPU, "Renderer shader paths are not configured");
+        return false;
+    }
+
     render_window = window;
+    SDL_free(g_nuklear_shader_path);
+    g_nuklear_shader_path = SDL_strdup(config->nuklear_shader_path);
+    if (!g_nuklear_shader_path) {
+        return false;
+    }
 
     gpu_device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV, true, NULL);
     if (!gpu_device) {
@@ -638,8 +645,6 @@ bool Renderer_Init(SDL_Window *const window) {
         g_present_mode = SDL_GPU_PRESENTMODE_MAILBOX;
     }
 
-    char shader_path[512] = {0};
-
     const SDL_GPUColorTargetDescription color_target_desc = {
         .format = SDL_GetGPUSwapchainTextureFormat(gpu_device, window),
         .blend_state =
@@ -654,22 +659,10 @@ bool Renderer_Init(SDL_Window *const window) {
             },
     };
 
-    SDL_GPUShader *const sprite_vs = LoadShader(gpu_device,
-                                                getResourcePath(shader_path, "shaders/sprite.metal"),
-                                                "vertex_main",
-                                                0,
-                                                1,
-                                                1,
-                                                0,
-                                                SDL_GPU_SHADERSTAGE_VERTEX);
-    SDL_GPUShader *const sprite_fs = LoadShader(gpu_device,
-                                                getResourcePath(shader_path, "shaders/sprite.metal"),
-                                                "fragment_main",
-                                                1,
-                                                0,
-                                                0,
-                                                0,
-                                                SDL_GPU_SHADERSTAGE_FRAGMENT);
+    SDL_GPUShader *const sprite_vs =
+        LoadShader(gpu_device, config->sprite_shader_path, "vertex_main", 0, 1, 1, 0, SDL_GPU_SHADERSTAGE_VERTEX);
+    SDL_GPUShader *const sprite_fs =
+        LoadShader(gpu_device, config->sprite_shader_path, "fragment_main", 1, 0, 0, 0, SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!sprite_vs || !sprite_fs) {
         return false;
     }
@@ -702,22 +695,10 @@ bool Renderer_Init(SDL_Window *const window) {
         return false;
     }
 
-    SDL_GPUShader *const geo_vs = LoadShader(gpu_device,
-                                             getResourcePath(shader_path, "shaders/geometry.metal"),
-                                             "vertex_geometry",
-                                             0,
-                                             1,
-                                             0,
-                                             0,
-                                             SDL_GPU_SHADERSTAGE_VERTEX);
-    SDL_GPUShader *const geo_fs = LoadShader(gpu_device,
-                                             getResourcePath(shader_path, "shaders/geometry.metal"),
-                                             "fragment_geometry",
-                                             0,
-                                             0,
-                                             0,
-                                             0,
-                                             SDL_GPU_SHADERSTAGE_FRAGMENT);
+    SDL_GPUShader *const geo_vs =
+        LoadShader(gpu_device, config->geometry_shader_path, "vertex_geometry", 0, 1, 0, 0, SDL_GPU_SHADERSTAGE_VERTEX);
+    SDL_GPUShader *const geo_fs = LoadShader(
+        gpu_device, config->geometry_shader_path, "fragment_geometry", 0, 0, 0, 0, SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!geo_vs || !geo_fs) {
         return false;
     }
@@ -774,22 +755,10 @@ bool Renderer_Init(SDL_Window *const window) {
         return false;
     }
 
-    SDL_GPUShader *const line_vs = LoadShader(gpu_device,
-                                              getResourcePath(shader_path, "shaders/ui.metal"),
-                                              "vertex_line",
-                                              0,
-                                              1,
-                                              0,
-                                              0,
-                                              SDL_GPU_SHADERSTAGE_VERTEX);
-    SDL_GPUShader *const line_fs = LoadShader(gpu_device,
-                                              getResourcePath(shader_path, "shaders/ui.metal"),
-                                              "fragment_line",
-                                              0,
-                                              1,
-                                              0,
-                                              0,
-                                              SDL_GPU_SHADERSTAGE_FRAGMENT);
+    SDL_GPUShader *const line_vs =
+        LoadShader(gpu_device, config->ui_shader_path, "vertex_line", 0, 1, 0, 0, SDL_GPU_SHADERSTAGE_VERTEX);
+    SDL_GPUShader *const line_fs =
+        LoadShader(gpu_device, config->ui_shader_path, "fragment_line", 0, 1, 0, 0, SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!line_vs || !line_fs) {
         return false;
     }
@@ -838,22 +807,10 @@ bool Renderer_Init(SDL_Window *const window) {
         return false;
     }
 
-    SDL_GPUShader *const text_vs = LoadShader(gpu_device,
-                                              getResourcePath(shader_path, "shaders/ui.metal"),
-                                              "vertex_text",
-                                              0,
-                                              1,
-                                              0,
-                                              0,
-                                              SDL_GPU_SHADERSTAGE_VERTEX);
-    SDL_GPUShader *const text_fs = LoadShader(gpu_device,
-                                              getResourcePath(shader_path, "shaders/ui.metal"),
-                                              "fragment_text",
-                                              1,
-                                              1,
-                                              0,
-                                              0,
-                                              SDL_GPU_SHADERSTAGE_FRAGMENT);
+    SDL_GPUShader *const text_vs =
+        LoadShader(gpu_device, config->ui_shader_path, "vertex_text", 0, 1, 0, 0, SDL_GPU_SHADERSTAGE_VERTEX);
+    SDL_GPUShader *const text_fs =
+        LoadShader(gpu_device, config->ui_shader_path, "fragment_text", 1, 1, 0, 0, SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!text_vs || !text_fs) {
         return false;
     }
@@ -949,7 +906,14 @@ bool Renderer_Init(SDL_Window *const window) {
     return true;
 }
 
+const char *Renderer_GetNuklearShaderPath(void) {
+    return g_nuklear_shader_path;
+}
+
 void Renderer_Shutdown(void) {
+    SDL_free(g_nuklear_shader_path);
+    g_nuklear_shader_path = nullptr;
+
     renderer_stream_shutdown(&sprite_stream);
     renderer_stream_shutdown(&world_geom_stream);
     renderer_stream_shutdown(&line_stream);
