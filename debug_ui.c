@@ -147,8 +147,11 @@ void DebugUI_Render(void) {
 
     SDL_GPUCommandBuffer *const cmd = Renderer_GetCommandBuffer();
     SDL_GPUTexture *const swapchain = Renderer_GetSwapchainTexture();
+    Uint32 swapchain_width = 0;
+    Uint32 swapchain_height = 0;
+    Renderer_GetSwapchainTextureSize(&swapchain_width, &swapchain_height);
 
-    if (!cmd || !swapchain) {
+    if (!cmd || !swapchain || swapchain_width == 0U || swapchain_height == 0U) {
         // Still need to clear Nuklear state even if we can't render
         nk_clear(nk_ctx);
         return;
@@ -158,7 +161,7 @@ void DebugUI_Render(void) {
     Renderer_EndRenderPass();
 
     // Render Nuklear UI
-    nk_sdl_gpu_render(nk_ctx, cmd, swapchain, NK_ANTI_ALIASING_ON);
+    nk_sdl_gpu_render(nk_ctx, cmd, swapchain, swapchain_width, swapchain_height, NK_ANTI_ALIASING_ON);
 
     // Resume render pass for any subsequent rendering
     Renderer_ResumeRenderPass();

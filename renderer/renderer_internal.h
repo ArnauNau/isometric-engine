@@ -10,6 +10,7 @@ SDL_Window *Renderer_GetWindow(void);
 SDL_GPUDevice *Renderer_GetDevice(void);
 SDL_GPUCommandBuffer *Renderer_GetCommandBuffer(void);
 SDL_GPUTexture *Renderer_GetSwapchainTexture(void);
+void Renderer_GetSwapchainTextureSize(Uint32 *out_width, Uint32 *out_height);
 
 // Render pass management for external rendering
 // Call EndRenderPass before external GPU rendering, ResumeRenderPass after

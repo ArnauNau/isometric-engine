@@ -54,6 +54,8 @@ NK_API int nk_sdl_gpu_handle_event(struct nk_context *ctx, const SDL_Event *evt)
 NK_API void nk_sdl_gpu_render(struct nk_context *ctx,
                               SDL_GPUCommandBuffer *cmd,
                               SDL_GPUTexture *swapchain,
+                              Uint32 swapchain_width,
+                              Uint32 swapchain_height,
                               enum nk_anti_aliasing AA);
 NK_API void nk_sdl_gpu_shutdown(struct nk_context *ctx);
 
@@ -618,6 +620,8 @@ NK_API int nk_sdl_gpu_handle_event(struct nk_context *const ctx, const SDL_Event
 NK_API void nk_sdl_gpu_render(struct nk_context *const ctx,
                               SDL_GPUCommandBuffer *const cmd,
                               SDL_GPUTexture *const swapchain,
+                              const Uint32 swapchain_width,
+                              const Uint32 swapchain_height,
                               enum nk_anti_aliasing AA) {
     struct nk_sdl_gpu *const sdl = (struct nk_sdl_gpu *)ctx->userdata.ptr;
     NK_ASSERT(sdl);
@@ -662,7 +666,7 @@ NK_API void nk_sdl_gpu_render(struct nk_context *const ctx,
         return;
     }
 
-    if (!cmd || !swapchain) {
+    if (!cmd || !swapchain || swapchain_width == 0U || swapchain_height == 0U) {
         nk_buffer_free(&vbuf);
         nk_buffer_free(&ebuf);
         nk_clear(ctx);
@@ -727,14 +731,14 @@ NK_API void nk_sdl_gpu_render(struct nk_context *const ctx,
     SDL_EndGPUCopyPass(copy);
 
     /* Setup projection matrix */
-    int win_w, win_h;
-    SDL_GetWindowSizeInPixels(sdl->win, &win_w, &win_h);
-    const float projection[16] = {2.0f / (float)win_w,
+    const Uint32 target_w = swapchain_width;
+    const Uint32 target_h = swapchain_height;
+    const float projection[16] = {2.0f / (float)target_w,
                                   0.0f,
                                   0.0f,
                                   0.0f,
                                   0.0f,
-                                  -2.0f / (float)win_h,
+                                  -2.0f / (float)target_h,
                                   0.0f,
                                   0.0f,
                                   0.0f,
@@ -750,6 +754,15 @@ NK_API void nk_sdl_gpu_render(struct nk_context *const ctx,
     const SDL_GPUColorTargetInfo color_target = {
         .texture = swapchain, .load_op = SDL_GPU_LOADOP_LOAD, .store_op = SDL_GPU_STOREOP_STORE};
     SDL_GPURenderPass *pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, nullptr);
+    const SDL_GPUViewport viewport = {
+        .x = 0.0f,
+        .y = 0.0f,
+        .w = (float)target_w,
+        .h = (float)target_h,
+        .min_depth = 0.0f,
+        .max_depth = 1.0f,
+    };
+    SDL_SetGPUViewport(pass, &viewport);
 
     SDL_BindGPUGraphicsPipeline(pass, sdl->gpu.pipeline);
     SDL_BindGPUVertexBuffers(
@@ -781,10 +794,10 @@ NK_API void nk_sdl_gpu_render(struct nk_context *const ctx,
             scissor.h += scissor.y;
             scissor.y = 0;
         }
-        if (scissor.x + scissor.w > win_w)
-            scissor.w = win_w - scissor.x;
-        if (scissor.y + scissor.h > win_h)
-            scissor.h = win_h - scissor.y;
+        if (scissor.x + scissor.w > (int)target_w)
+            scissor.w = (int)target_w - scissor.x;
+        if (scissor.y + scissor.h > (int)target_h)
+            scissor.h = (int)target_h - scissor.y;
         if (scissor.w <= 0 || scissor.h <= 0) {
             index_offset += draw_cmd->elem_count;
             continue;

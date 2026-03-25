@@ -39,6 +39,16 @@ typedef struct MisoByteBuffer {
 
 typedef void (*MisoSimTickFn)(void *user, float fixed_dt_seconds);
 
+/*
+ * Normal frame rendering order is world -> ui -> debug via miso_end_frame().
+ *
+ * Live window-resize redraws are a separate maintenance path used to avoid
+ * stretched stale frames while the OS is interactively resizing the window.
+ * That path is intentionally weaker than a full frame contract: clients should
+ * only rely on the world layer being kept visually current during live resize.
+ * UI/debug may be skipped or may not visibly update until the next normal
+ * frame resumes.
+ */
 typedef struct MisoGameHooks {
     void (*on_event)(void *game_ctx, const MisoEvent *event);
     void (*on_sim_tick)(void *game_ctx, float fixed_dt_seconds);

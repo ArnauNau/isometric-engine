@@ -35,9 +35,24 @@ struct MisoEngine {
     MisoCameraState *cameras;
     uint32_t camera_capacity;
     uint32_t camera_count;
+
+    bool frame_in_progress;
+    bool render_in_progress;
+    bool rendered_from_event_watch_this_frame;
+    bool has_applied_resize;
+    int applied_resize_width;
+    int applied_resize_height;
+    bool has_notified_resize;
+    int notified_resize_width;
+    int notified_resize_height;
+    SDL_AtomicInt pending_resize_width;
+    SDL_AtomicInt pending_resize_height;
+    SDL_AtomicInt pending_resize_dirty;
 };
 
 void miso__engine_request_quit(MisoEngine *engine);
+void miso__engine_apply_resize_if_needed(MisoEngine *engine, int pixel_width, int pixel_height);
+bool miso__engine_should_dispatch_resize_event(MisoEngine *engine, int pixel_width, int pixel_height);
 MisoCameraState *miso__camera_get(MisoEngine *engine, MisoCameraId id);
 const MisoCameraState *miso__camera_get_const(const MisoEngine *engine, MisoCameraId id);
 void miso__camera_get_view_projection(const MisoEngine *engine, MisoCameraId id, float out_matrix[16]);

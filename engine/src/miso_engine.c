@@ -101,6 +101,164 @@ static bool miso__ensure_camera_capacity(MisoEngine *engine) {
     return true;
 }
 
+static void miso__sanitize_window_pixels(int *const inout_width, int *const inout_height) {
+    if (*inout_width <= 0) {
+        *inout_width = 1;
+    }
+    if (*inout_height <= 0) {
+        *inout_height = 1;
+    }
+}
+
+void miso__engine_apply_resize_if_needed(MisoEngine *engine, int pixel_width, int pixel_height) {
+    if (!engine) {
+        return;
+    }
+
+    miso__sanitize_window_pixels(&pixel_width, &pixel_height);
+    if (engine->has_applied_resize && engine->applied_resize_width == pixel_width &&
+        engine->applied_resize_height == pixel_height) {
+        return;
+    }
+
+    engine->applied_resize_width = pixel_width;
+    engine->applied_resize_height = pixel_height;
+    engine->has_applied_resize = true;
+    for (uint32_t i = 0; i < engine->camera_count; i++) {
+        MisoCameraState *const camera = &engine->cameras[i];
+        if (camera->used) {
+            camera->viewport.x = 0;
+            camera->viewport.y = 0;
+            camera->viewport.w = pixel_width;
+            camera->viewport.h = pixel_height;
+        }
+    }
+    miso__renderer_resize(pixel_width, pixel_height);
+}
+
+bool miso__engine_should_dispatch_resize_event(MisoEngine *engine, int pixel_width, int pixel_height) {
+    if (!engine) {
+        return false;
+    }
+
+    miso__sanitize_window_pixels(&pixel_width, &pixel_height);
+    if (engine->has_notified_resize && engine->notified_resize_width == pixel_width &&
+        engine->notified_resize_height == pixel_height) {
+        return false;
+    }
+
+    engine->notified_resize_width = pixel_width;
+    engine->notified_resize_height = pixel_height;
+    engine->has_notified_resize = true;
+    return true;
+}
+
+static void miso__render_registered_game(MisoEngine *const engine) {
+    if (engine->game_registered && engine->game_hooks.on_render_world) {
+        engine->game_hooks.on_render_world(engine->game_ctx, engine);
+    }
+    if (engine->game_registered && engine->game_hooks.on_render_ui) {
+        engine->game_hooks.on_render_ui(engine->game_ctx, engine);
+    }
+    if (engine->game_registered && engine->game_hooks.on_render_debug) {
+        engine->game_hooks.on_render_debug(engine->game_ctx, engine);
+    }
+}
+
+static void miso__render_registered_game_without_debug(MisoEngine *const engine) {
+    if (engine->game_registered && engine->game_hooks.on_render_world) {
+        engine->game_hooks.on_render_world(engine->game_ctx, engine);
+    }
+    if (engine->game_registered && engine->game_hooks.on_render_ui) {
+        engine->game_hooks.on_render_ui(engine->game_ctx, engine);
+    }
+}
+
+static void
+miso__dispatch_resize_event_if_needed(MisoEngine *const engine, const int pixel_width, const int pixel_height) {
+    if (!engine || !engine->game_registered || !engine->game_hooks.on_event) {
+        return;
+    }
+    if (!miso__engine_should_dispatch_resize_event(engine, pixel_width, pixel_height)) {
+        return;
+    }
+
+    MisoEvent resize_event = {0};
+    resize_event.type = MISO_EVENT_WINDOW_RESIZED;
+    resize_event.data.window_resized.width = pixel_width;
+    resize_event.data.window_resized.height = pixel_height;
+    engine->game_hooks.on_event(engine->game_ctx, &resize_event);
+}
+
+static void miso__drain_pending_resize(MisoEngine *const engine) {
+    if (!engine || SDL_GetAtomicInt(&engine->pending_resize_dirty) == 0) {
+        return;
+    }
+
+    const int pixel_width = SDL_GetAtomicInt(&engine->pending_resize_width);
+    const int pixel_height = SDL_GetAtomicInt(&engine->pending_resize_height);
+    SDL_SetAtomicInt(&engine->pending_resize_dirty, 0);
+
+    miso__engine_apply_resize_if_needed(engine, pixel_width, pixel_height);
+    miso__dispatch_resize_event_if_needed(engine, pixel_width, pixel_height);
+}
+
+static void miso__render_immediate_if_possible(MisoEngine *const engine) {
+    if (!engine || !engine->running || engine->render_in_progress) {
+        return;
+    }
+
+    const bool rendered_during_frame = engine->frame_in_progress;
+    engine->render_in_progress = true;
+    engine->last_counter = SDL_GetPerformanceCounter();
+    miso__renderer_begin_frame();
+    /*
+     * Live-resize redraw is intentionally a weaker contract than a normal
+     * frame. The goal is to keep the world visually current and avoid the OS
+     * stretching a stale frame; callers should not rely on UI/debug matching a
+     * full miso_end_frame() render while the resize interaction is in flight.
+     */
+    miso__render_registered_game_without_debug(engine);
+    miso__renderer_end_frame();
+    engine->render_in_progress = false;
+    if (rendered_during_frame) {
+        engine->rendered_from_event_watch_this_frame = true;
+    }
+}
+
+static bool SDLCALL miso__live_resize_event_watch(void *const userdata, SDL_Event *const event) {
+    MisoEngine *engine = (MisoEngine *)userdata;
+    if (!engine || !engine->running) {
+        return true;
+    }
+
+    if (event->type == SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED) {
+        int pixel_width = event->window.data1;
+        int pixel_height = event->window.data2;
+        miso__sanitize_window_pixels(&pixel_width, &pixel_height);
+        SDL_SetAtomicInt(&engine->pending_resize_width, pixel_width);
+        SDL_SetAtomicInt(&engine->pending_resize_height, pixel_height);
+        SDL_SetAtomicInt(&engine->pending_resize_dirty, 1);
+    } else if (event->type == SDL_EVENT_WINDOW_EXPOSED) {
+        if (!SDL_IsMainThread()) {
+            return true;
+        }
+        if (engine->window) {
+            int pixel_width = 1;
+            int pixel_height = 1;
+            SDL_GetWindowSizeInPixels(engine->window, &pixel_width, &pixel_height);
+            miso__sanitize_window_pixels(&pixel_width, &pixel_height);
+            SDL_SetAtomicInt(&engine->pending_resize_width, pixel_width);
+            SDL_SetAtomicInt(&engine->pending_resize_height, pixel_height);
+            SDL_SetAtomicInt(&engine->pending_resize_dirty, 1);
+        }
+        miso__drain_pending_resize(engine);
+        miso__render_immediate_if_possible(engine);
+    }
+
+    return true;
+}
+
 MisoResult miso_create(const MisoConfig *cfg, MisoEngine **out_engine) {
     if (!out_engine) {
         return MISO_ERR_INVALID_ARG;
@@ -166,6 +324,14 @@ MisoResult miso_create(const MisoConfig *cfg, MisoEngine **out_engine) {
     engine->running = true;
     engine->perf_frequency = SDL_GetPerformanceFrequency();
     engine->last_counter = SDL_GetPerformanceCounter();
+    engine->frame_in_progress = false;
+    engine->render_in_progress = false;
+    engine->rendered_from_event_watch_this_frame = false;
+    engine->has_applied_resize = false;
+    engine->has_notified_resize = false;
+    SDL_SetAtomicInt(&engine->pending_resize_width, 0);
+    SDL_SetAtomicInt(&engine->pending_resize_height, 0);
+    SDL_SetAtomicInt(&engine->pending_resize_dirty, 0);
 
     if (!miso__ensure_camera_capacity(engine)) {
         miso__renderer_ui_shutdown();
@@ -176,6 +342,8 @@ MisoResult miso_create(const MisoConfig *cfg, MisoEngine **out_engine) {
         return MISO_ERR_OUT_OF_MEMORY;
     }
 
+    SDL_AddEventWatch(miso__live_resize_event_watch, engine);
+
     *out_engine = engine;
     return MISO_OK;
 }
@@ -184,6 +352,8 @@ void miso_destroy(MisoEngine *engine) {
     if (!engine) {
         return;
     }
+
+    SDL_RemoveEventWatch(miso__live_resize_event_watch, engine);
 
     miso__renderer_ui_shutdown();
     miso__render_shutdown();
@@ -198,10 +368,14 @@ void miso_destroy(MisoEngine *engine) {
     SDL_free(engine);
 }
 
-bool miso_begin_frame(MisoEngine *engine) {
+bool miso_begin_frame(MisoEngine *const engine) {
     if (!engine || !engine->running) {
         return false;
     }
+
+    engine->frame_in_progress = true;
+    engine->rendered_from_event_watch_this_frame = false;
+    miso__drain_pending_resize(engine);
 
     const uint64_t now = SDL_GetPerformanceCounter();
     const uint64_t delta = now - engine->last_counter;
@@ -213,27 +387,27 @@ bool miso_begin_frame(MisoEngine *engine) {
     return true;
 }
 
-void miso_end_frame(MisoEngine *engine) {
-    if (!engine || !engine->running) {
+void miso_end_frame(MisoEngine *const engine) {
+    if (!engine || !engine->running || engine->render_in_progress) {
         return;
     }
 
+    miso__drain_pending_resize(engine);
+    if (engine->rendered_from_event_watch_this_frame) {
+        engine->rendered_from_event_watch_this_frame = false;
+        engine->frame_in_progress = false;
+        return;
+    }
+
+    engine->render_in_progress = true;
     miso__renderer_begin_frame();
-
-    if (engine->game_registered && engine->game_hooks.on_render_world) {
-        engine->game_hooks.on_render_world(engine->game_ctx, engine);
-    }
-    if (engine->game_registered && engine->game_hooks.on_render_ui) {
-        engine->game_hooks.on_render_ui(engine->game_ctx, engine);
-    }
-    if (engine->game_registered && engine->game_hooks.on_render_debug) {
-        engine->game_hooks.on_render_debug(engine->game_ctx, engine);
-    }
-
+    miso__render_registered_game(engine);
     miso__renderer_end_frame();
+    engine->render_in_progress = false;
+    engine->frame_in_progress = false;
 }
 
-void miso_get_window_size_pixels(const MisoEngine *engine, int *out_width, int *out_height) {
+void miso_get_window_size_pixels(const MisoEngine *const engine, int *const out_width, int *const out_height) {
     if (!engine || !engine->window || !out_width || !out_height) {
         return;
     }
@@ -247,7 +421,7 @@ float miso_get_window_pixel_density(const MisoEngine *engine) {
     return SDL_GetWindowPixelDensity(engine->window);
 }
 
-void miso_run_simulation_ticks(MisoEngine *engine, MisoSimTickFn tick_fn, void *user) {
+void miso_run_simulation_ticks(MisoEngine *engine, const MisoSimTickFn tick_fn, void *user) {
     if (!engine || !engine->running) {
         return;
     }

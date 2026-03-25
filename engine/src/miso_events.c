@@ -73,76 +73,80 @@ bool miso_poll_event(MisoEngine *engine, MisoEvent *out_event) {
     }
 
     SDL_Event event;
-    if (!SDL_PollEvent(&event)) {
-        return false;
+    while (SDL_PollEvent(&event)) {
+        SDL_memset(out_event, 0, sizeof(*out_event));
+        out_event->type = MISO_EVENT_NONE;
+        bool dispatch_to_game = true;
+
+        switch (event.type) {
+        case SDL_EVENT_QUIT:
+            out_event->type = MISO_EVENT_QUIT;
+            miso__engine_request_quit(engine);
+            break;
+
+        case SDL_EVENT_WINDOW_RESIZED:
+        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
+            int pixel_width = 1;
+            int pixel_height = 1;
+            miso__get_window_pixel_size(engine, event.window.data1, event.window.data2, &pixel_width, &pixel_height);
+            out_event->type = MISO_EVENT_WINDOW_RESIZED;
+            out_event->data.window_resized.width = pixel_width;
+            out_event->data.window_resized.height = pixel_height;
+            miso__engine_apply_resize_if_needed(engine, pixel_width, pixel_height);
+            dispatch_to_game = miso__engine_should_dispatch_resize_event(engine, pixel_width, pixel_height);
+            break;
+        }
+
+        case SDL_EVENT_MOUSE_MOTION:
+            out_event->type = MISO_EVENT_MOUSE_MOVE;
+            out_event->data.mouse_move.x = (int)SDL_lroundf(event.motion.x);
+            out_event->data.mouse_move.y = (int)SDL_lroundf(event.motion.y);
+            out_event->data.mouse_move.dx = (int)SDL_lroundf(event.motion.xrel);
+            out_event->data.mouse_move.dy = (int)SDL_lroundf(event.motion.yrel);
+            break;
+
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            out_event->type = MISO_EVENT_MOUSE_BUTTON;
+            out_event->data.mouse_button.x = (int)SDL_lroundf(event.button.x);
+            out_event->data.mouse_button.y = (int)SDL_lroundf(event.button.y);
+            out_event->data.mouse_button.button = miso__to_mouse_button(event.button.button);
+            out_event->data.mouse_button.down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
+            break;
+
+        case SDL_EVENT_MOUSE_WHEEL:
+            out_event->type = MISO_EVENT_MOUSE_WHEEL;
+            out_event->data.mouse_wheel.x = event.wheel.x;
+            out_event->data.mouse_wheel.y = event.wheel.y;
+            break;
+
+        case SDL_EVENT_KEY_DOWN:
+        case SDL_EVENT_KEY_UP:
+            out_event->type = MISO_EVENT_KEY;
+            out_event->data.key.keycode = (int)event.key.key;
+            out_event->data.key.scancode = (int)event.key.scancode;
+            out_event->data.key.modifiers = miso__to_key_modifiers(event.key.mod);
+            out_event->data.key.down = event.type == SDL_EVENT_KEY_DOWN;
+            out_event->data.key.repeat = event.key.repeat;
+            break;
+
+        case SDL_EVENT_TEXT_INPUT:
+            out_event->type = MISO_EVENT_TEXT_INPUT;
+            SDL_strlcpy(out_event->data.text_input.text, event.text.text, sizeof(out_event->data.text_input.text));
+            break;
+
+        default:
+            continue;
+        }
+
+        if (dispatch_to_game && engine->game_registered && engine->game_hooks.on_event) {
+            engine->game_hooks.on_event(engine->game_ctx, out_event);
+        }
+
+        return true;
     }
 
     SDL_memset(out_event, 0, sizeof(*out_event));
     out_event->type = MISO_EVENT_NONE;
-
-    switch (event.type) {
-    case SDL_EVENT_QUIT:
-        out_event->type = MISO_EVENT_QUIT;
-        miso__engine_request_quit(engine);
-        break;
-
-    case SDL_EVENT_WINDOW_RESIZED:
-    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED: {
-        int pixel_width = 1;
-        int pixel_height = 1;
-        miso__get_window_pixel_size(engine, event.window.data1, event.window.data2, &pixel_width, &pixel_height);
-        out_event->type = MISO_EVENT_WINDOW_RESIZED;
-        out_event->data.window_resized.width = pixel_width;
-        out_event->data.window_resized.height = pixel_height;
-        miso__renderer_resize(pixel_width, pixel_height);
-        break;
-    }
-
-    case SDL_EVENT_MOUSE_MOTION:
-        out_event->type = MISO_EVENT_MOUSE_MOVE;
-        out_event->data.mouse_move.x = (int)SDL_lroundf(event.motion.x);
-        out_event->data.mouse_move.y = (int)SDL_lroundf(event.motion.y);
-        out_event->data.mouse_move.dx = (int)SDL_lroundf(event.motion.xrel);
-        out_event->data.mouse_move.dy = (int)SDL_lroundf(event.motion.yrel);
-        break;
-
-    case SDL_EVENT_MOUSE_BUTTON_DOWN:
-    case SDL_EVENT_MOUSE_BUTTON_UP:
-        out_event->type = MISO_EVENT_MOUSE_BUTTON;
-        out_event->data.mouse_button.x = (int)SDL_lroundf(event.button.x);
-        out_event->data.mouse_button.y = (int)SDL_lroundf(event.button.y);
-        out_event->data.mouse_button.button = miso__to_mouse_button(event.button.button);
-        out_event->data.mouse_button.down = event.type == SDL_EVENT_MOUSE_BUTTON_DOWN;
-        break;
-
-    case SDL_EVENT_MOUSE_WHEEL:
-        out_event->type = MISO_EVENT_MOUSE_WHEEL;
-        out_event->data.mouse_wheel.x = event.wheel.x;
-        out_event->data.mouse_wheel.y = event.wheel.y;
-        break;
-
-    case SDL_EVENT_KEY_DOWN:
-    case SDL_EVENT_KEY_UP:
-        out_event->type = MISO_EVENT_KEY;
-        out_event->data.key.keycode = (int)event.key.key;
-        out_event->data.key.scancode = (int)event.key.scancode;
-        out_event->data.key.modifiers = miso__to_key_modifiers(event.key.mod);
-        out_event->data.key.down = event.type == SDL_EVENT_KEY_DOWN;
-        out_event->data.key.repeat = event.key.repeat;
-        break;
-
-    case SDL_EVENT_TEXT_INPUT:
-        out_event->type = MISO_EVENT_TEXT_INPUT;
-        SDL_strlcpy(out_event->data.text_input.text, event.text.text, sizeof(out_event->data.text_input.text));
-        break;
-
-    default:
-        return false;
-    }
-
-    if (engine->game_registered && engine->game_hooks.on_event) {
-        engine->game_hooks.on_event(engine->game_ctx, out_event);
-    }
-
-    return true;
+    return false;
 }

@@ -21,7 +21,11 @@ static TTF_TextEngine *text_engine = nullptr;
 
 static SDL_GPUCommandBuffer *cmd_buffer = nullptr;
 static SDL_GPUTexture *swapchain_texture = nullptr;
+static Uint32 swapchain_texture_width = 0;
+static Uint32 swapchain_texture_height = 0;
 static SDL_GPUTexture *depth_texture = nullptr;
+static Uint32 depth_texture_width = 0;
+static Uint32 depth_texture_height = 0;
 static SDL_GPUPresentMode g_present_mode = SDL_GPU_PRESENTMODE_VSYNC;
 static RendererVSyncAcquireMode g_vsync_acquire_mode = RENDERER_VSYNC_ACQUIRE_BLOCKING;
 static bool g_upload_suppressed = false;
@@ -139,11 +143,8 @@ static inline Uint32 renderer_align_up(const Uint32 value, const Uint32 align) {
 }
 
 static void renderer_make_screen_projection(float out[16]) {
-    int w = 1;
-    int h = 1;
-    if (render_window) {
-        SDL_GetWindowSizeInPixels(render_window, &w, &h);
-    }
+    Uint32 w = swapchain_texture_width;
+    Uint32 h = swapchain_texture_height;
     if (w <= 0) {
         w = 1;
     }
@@ -405,6 +406,22 @@ static void renderer_count_pass_end(void) {
     g_frame_stats.passes.end_calls++;
 }
 
+static void renderer_set_full_swapchain_viewport(SDL_GPURenderPass *const pass) {
+    if (!pass || swapchain_texture_width == 0U || swapchain_texture_height == 0U) {
+        return;
+    }
+
+    const SDL_GPUViewport viewport = {
+        .x = 0.0f,
+        .y = 0.0f,
+        .w = (float)swapchain_texture_width,
+        .h = (float)swapchain_texture_height,
+        .min_depth = 0.0f,
+        .max_depth = 1.0f,
+    };
+    SDL_SetGPUViewport(pass, &viewport);
+}
+
 static void renderer_bind_sprite_pipeline(SDL_GPURenderPass *const pass, SDL_GPUTexture *const texture) {
     SDL_BindGPUGraphicsPipeline(pass, sprite_pipeline);
     SDL_BindGPUFragmentSamplers(pass, 0, &((SDL_GPUTextureSamplerBinding){.texture = texture, .sampler = sampler}), 1);
@@ -431,6 +448,7 @@ static void renderer_draw_world_pass(SDL_GPUCommandBuffer *const cmd) {
     SDL_GPURenderPass *const pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, &depth_target);
     renderer_count_pass_begin();
     g_frame_stats.passes.world_passes++;
+    renderer_set_full_swapchain_viewport(pass);
 
     const SDL_GPUTexture *bound_sprite_tex = nullptr;
     for (Uint32 i = 0; i < sprite_cmd_count; i++) {
@@ -498,6 +516,7 @@ static void renderer_draw_ui_pass(SDL_GPUCommandBuffer *cmd) {
     SDL_GPURenderPass *const pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
     renderer_count_pass_begin();
     g_frame_stats.passes.ui_passes++;
+    renderer_set_full_swapchain_viewport(pass);
 
     for (Uint32 i = 0; i < ui_geom_cmd_count; i++) {
         const GeometryCmd *cmdi = &ui_geom_cmds[i];
@@ -583,6 +602,10 @@ static void renderer_flush_queued_draws(void) {
 }
 
 static void CreateDepthTexture(const Uint32 width, const Uint32 height) {
+    if (depth_texture && depth_texture_width == width && depth_texture_height == height) {
+        return;
+    }
+
     if (depth_texture) {
         SDL_ReleaseGPUTexture(gpu_device, depth_texture);
         depth_texture = nullptr;
@@ -598,6 +621,13 @@ static void CreateDepthTexture(const Uint32 width, const Uint32 height) {
         .usage = SDL_GPU_TEXTUREUSAGE_DEPTH_STENCIL_TARGET,
     };
     depth_texture = SDL_CreateGPUTexture(gpu_device, &depth_info);
+    if (depth_texture) {
+        depth_texture_width = width;
+        depth_texture_height = height;
+    } else {
+        depth_texture_width = 0;
+        depth_texture_height = 0;
+    }
 }
 
 bool Renderer_Init(SDL_Window *const window, const RendererConfig *const config) {
@@ -952,6 +982,8 @@ void Renderer_Shutdown(void) {
     if (depth_texture) {
         SDL_ReleaseGPUTexture(gpu_device, depth_texture);
         depth_texture = nullptr;
+        depth_texture_width = 0;
+        depth_texture_height = 0;
     }
 
     if (gpu_device) {
@@ -1008,6 +1040,8 @@ void Renderer_SetPresentMode(const SDL_GPUPresentMode mode) {
     }
 
     swapchain_texture = nullptr;
+    swapchain_texture_width = 0;
+    swapchain_texture_height = 0;
 }
 
 void Renderer_SetVSync(const bool enabled) {
@@ -1167,8 +1201,10 @@ void Renderer_BeginFrame(void) {
         g_present_mode == SDL_GPU_PRESENTMODE_VSYNC && g_vsync_acquire_mode == RENDERER_VSYNC_ACQUIRE_BLOCKING;
     const bool got_swapchain =
         blocking_acquire
-            ? SDL_WaitAndAcquireGPUSwapchainTexture(cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr)
-            : SDL_AcquireGPUSwapchainTexture(cmd_buffer, render_window, &swapchain_texture, nullptr, nullptr);
+            ? SDL_WaitAndAcquireGPUSwapchainTexture(
+                  cmd_buffer, render_window, &swapchain_texture, &swapchain_texture_width, &swapchain_texture_height)
+            : SDL_AcquireGPUSwapchainTexture(
+                  cmd_buffer, render_window, &swapchain_texture, &swapchain_texture_width, &swapchain_texture_height);
     const Uint64 acquire_end = SDL_GetPerformanceCounter();
     g_frame_stats.timing.acquire_swapchain_ms = renderer_elapsed_ms(acquire_start, acquire_end);
 
@@ -1176,6 +1212,8 @@ void Renderer_BeginFrame(void) {
         SDL_SubmitGPUCommandBuffer(cmd_buffer);
         cmd_buffer = nullptr;
         swapchain_texture = nullptr;
+        swapchain_texture_width = 0;
+        swapchain_texture_height = 0;
         g_frame_stats.timing.frame_cpu_ms = renderer_elapsed_ms(g_frame_cpu_start_ticks, SDL_GetPerformanceCounter());
         g_frame_active = false;
         return;
@@ -1184,9 +1222,15 @@ void Renderer_BeginFrame(void) {
     if (!swapchain_texture) {
         SDL_SubmitGPUCommandBuffer(cmd_buffer);
         cmd_buffer = nullptr;
+        swapchain_texture_width = 0;
+        swapchain_texture_height = 0;
         g_frame_stats.timing.frame_cpu_ms = renderer_elapsed_ms(g_frame_cpu_start_ticks, SDL_GetPerformanceCounter());
         g_frame_active = false;
         return;
+    }
+
+    if (swapchain_texture_width > 0U && swapchain_texture_height > 0U) {
+        CreateDepthTexture(swapchain_texture_width, swapchain_texture_height);
     }
 
     current_frame_slot = (current_frame_slot + 1U) % RENDERER_STREAM_FRAMES_IN_FLIGHT;
@@ -1206,6 +1250,8 @@ void Renderer_BeginFrame(void) {
         SDL_SubmitGPUCommandBuffer(cmd_buffer);
         cmd_buffer = nullptr;
         swapchain_texture = nullptr;
+        swapchain_texture_width = 0;
+        swapchain_texture_height = 0;
         g_frame_stats.timing.frame_cpu_ms = renderer_elapsed_ms(g_frame_cpu_start_ticks, SDL_GetPerformanceCounter());
         g_frame_active = false;
         return;
@@ -1233,6 +1279,8 @@ void Renderer_EndFrame(void) {
     g_frame_stats.timing.frame_cpu_ms = renderer_elapsed_ms(g_frame_cpu_start_ticks, submit_end);
     cmd_buffer = nullptr;
     swapchain_texture = nullptr;
+    swapchain_texture_width = 0;
+    swapchain_texture_height = 0;
     g_frame_active = false;
 }
 
@@ -1553,6 +1601,15 @@ SDL_GPUCommandBuffer *Renderer_GetCommandBuffer(void) {
 
 SDL_GPUTexture *Renderer_GetSwapchainTexture(void) {
     return swapchain_texture;
+}
+
+void Renderer_GetSwapchainTextureSize(Uint32 *const out_width, Uint32 *const out_height) {
+    if (out_width) {
+        *out_width = swapchain_texture_width;
+    }
+    if (out_height) {
+        *out_height = swapchain_texture_height;
+    }
 }
 
 void Renderer_EndRenderPass(void) {
