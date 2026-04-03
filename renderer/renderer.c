@@ -43,6 +43,7 @@ static Uint32 g_allowed_frames_in_flight = RENDERER_DEFAULT_ALLOWED_FRAMES_IN_FL
 #define RENDERER_MAX_UI_GEOM_CMDS 4096U
 #define RENDERER_MAX_UI_TEXT_CMDS 1024U
 #define RENDERER_MAX_UI_TEXT_RANGES 16U
+#define RENDERER_MAX_FRAME_MATRICES 8U
 
 #define RENDERER_SPRITE_SLOT_BYTES (sizeof(SpriteInstance) * 100000U)
 #define RENDERER_WORLD_GEOM_SLOT_BYTES (sizeof(SDL_Vertex) * 65536U)
@@ -78,14 +79,14 @@ typedef struct {
 typedef struct {
     Uint32 vertex_offset;
     Uint32 vertex_count;
-    float matrix[16];
+    uint8_t matrix_index;
 } GeometryCmd;
 
 typedef struct {
     Uint32 vertex_offset;
     Uint32 vertex_count;
     SDL_FColor color;
-    float matrix[16];
+    uint8_t matrix_index;
 } LineCmd;
 
 typedef struct {
@@ -126,6 +127,11 @@ static Uint32 ui_geom_cmd_count = 0;
 
 static UITextCmd ui_text_cmds[RENDERER_MAX_UI_TEXT_CMDS] = {0};
 static Uint32 ui_text_cmd_count = 0;
+
+static float frame_matrices[RENDERER_MAX_FRAME_MATRICES][16] = {0};
+static uint8_t frame_matrix_count = 0;
+static uint8_t current_world_matrix_index = 0;
+static bool frame_matrix_overflow_logged = false;
 
 static Uint32 current_frame_slot = 0;
 static bool frame_queues_flushed = false;
@@ -377,6 +383,44 @@ static void renderer_record_stream_stats(void) {
                                          g_frame_stats.uploaded_bytes_ui_text;
 }
 
+static uint8_t renderer_register_frame_matrix(const float matrix[16]) {
+    if (!matrix) {
+        return 0;
+    }
+
+    for (uint8_t i = 0; i < frame_matrix_count; i++) {
+        if (SDL_memcmp(frame_matrices[i], matrix, sizeof(float) * 16U) == 0) {
+            return i;
+        }
+    }
+
+    if (frame_matrix_count < RENDERER_MAX_FRAME_MATRICES) {
+        const uint8_t matrix_index = frame_matrix_count++;
+        SDL_memcpy(frame_matrices[matrix_index], matrix, sizeof(float) * 16U);
+        return matrix_index;
+    }
+
+    if (!frame_matrix_overflow_logged) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_RENDER,
+                    "Frame matrix table overflow; reusing matrix 0 for additional geometry/line commands");
+        frame_matrix_overflow_logged = true;
+    }
+    return 0;
+}
+
+static const float *renderer_frame_matrix(const uint8_t matrix_index) {
+    if (matrix_index < frame_matrix_count) {
+        return frame_matrices[matrix_index];
+    }
+    return sprite_uniforms.viewProjection;
+}
+
+static void renderer_reset_frame_matrices(void) {
+    frame_matrix_count = 0;
+    frame_matrix_overflow_logged = false;
+    current_world_matrix_index = renderer_register_frame_matrix(sprite_uniforms.viewProjection);
+}
+
 static void renderer_reset_queues(void) {
     sprite_cmd_count = 0;
     world_geom_cmd_count = 0;
@@ -478,7 +522,7 @@ static void renderer_draw_world_pass(SDL_GPUCommandBuffer *const cmd) {
         SDL_BindGPUGraphicsPipeline(pass, geometry_pipeline);
         SDL_BindGPUVertexBuffers(
             pass, 0, &((SDL_GPUBufferBinding){.buffer = world_geom_stream.gpu, .offset = cmdi->vertex_offset}), 1);
-        SDL_PushGPUVertexUniformData(cmd, 0, cmdi->matrix, sizeof(float) * 16U);
+        SDL_PushGPUVertexUniformData(cmd, 0, renderer_frame_matrix(cmdi->matrix_index), sizeof(float) * 16U);
         SDL_DrawGPUPrimitives(pass, cmdi->vertex_count, 1, 0, 0);
 
         g_frame_stats.queues[RENDERER_STATS_QUEUE_WORLD_GEOMETRY].draw_calls++;
@@ -494,7 +538,7 @@ static void renderer_draw_world_pass(SDL_GPUCommandBuffer *const cmd) {
         SDL_BindGPUGraphicsPipeline(pass, line_pipeline);
         SDL_BindGPUVertexBuffers(
             pass, 0, &((SDL_GPUBufferBinding){.buffer = line_stream.gpu, .offset = cmdi->vertex_offset}), 1);
-        SDL_PushGPUVertexUniformData(cmd, 0, cmdi->matrix, sizeof(float) * 16U);
+        SDL_PushGPUVertexUniformData(cmd, 0, renderer_frame_matrix(cmdi->matrix_index), sizeof(float) * 16U);
         SDL_PushGPUFragmentUniformData(cmd, 0, &cmdi->color, sizeof(cmdi->color));
         SDL_DrawGPUPrimitives(pass, cmdi->vertex_count, 1, 0, 0);
 
@@ -1184,6 +1228,7 @@ void Renderer_DestroyTexture(SDL_GPUTexture *const texture) {
 
 void Renderer_BeginFrame(void) {
     renderer_reset_queues();
+    renderer_reset_frame_matrices();
     renderer_reset_frame_stats();
     frame_queues_flushed = false;
     g_frame_active = true;
@@ -1289,6 +1334,9 @@ void Renderer_SetViewProjection(const float *const viewProjMatrix) {
         return;
     }
     SDL_memcpy(sprite_uniforms.viewProjection, viewProjMatrix, sizeof(float) * 16U);
+    if (g_frame_active) {
+        current_world_matrix_index = renderer_register_frame_matrix(sprite_uniforms.viewProjection);
+    }
 }
 
 void Renderer_SetWaterParams(const float time, const float speed, const float amplitude, const float phase) {
@@ -1368,7 +1416,7 @@ void Renderer_DrawLineBatch(const float *const vertices_xyz, const int vertex_co
     cmd->vertex_offset = byte_offset;
     cmd->vertex_count = (Uint32)vertex_count;
     cmd->color = color;
-    SDL_memcpy(cmd->matrix, sprite_uniforms.viewProjection, sizeof(float) * 16U);
+    cmd->matrix_index = current_world_matrix_index;
 
     g_frame_stats.queues[RENDERER_STATS_QUEUE_LINE].cmd_count = line_cmd_count;
     g_frame_stats.line_vertices_submitted += (Uint32)vertex_count;
@@ -1392,7 +1440,7 @@ void Renderer_DrawGeometry(const SDL_Vertex *const vertices, const int count) {
     GeometryCmd *cmd = &world_geom_cmds[world_geom_cmd_count++];
     cmd->vertex_offset = byte_offset;
     cmd->vertex_count = (Uint32)count;
-    SDL_memcpy(cmd->matrix, sprite_uniforms.viewProjection, sizeof(float) * 16U);
+    cmd->matrix_index = current_world_matrix_index;
 
     g_frame_stats.queues[RENDERER_STATS_QUEUE_WORLD_GEOMETRY].cmd_count = world_geom_cmd_count;
 }
@@ -1479,7 +1527,7 @@ void Renderer_FlushUIGeometry(const SDL_Vertex *vertices, const int count) {
     GeometryCmd *cmd = &ui_geom_cmds[ui_geom_cmd_count++];
     cmd->vertex_offset = byte_offset;
     cmd->vertex_count = (Uint32)count;
-    SDL_memcpy(cmd->matrix, g_screen_projection, sizeof(float) * 16U);
+    cmd->matrix_index = 0;
 
     g_frame_stats.queues[RENDERER_STATS_QUEUE_UI_GEOMETRY].cmd_count = ui_geom_cmd_count;
 }
