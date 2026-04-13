@@ -277,32 +277,16 @@ void Tilemap_SetOccupied(const Tilemap *const tilemap, const int x, const int y,
 // =============================================================================
 
 SDL_Point Tilemap_ScreenToTile(const Tilemap *const tilemap, const float screen_x, const float screen_y) {
-    const float tile_w = (float)tilemap->tileset->tile_width;
-    const float tile_h = (float)tilemap->tileset->tile_height;
-
-    // Isometric dimensions
-    const float iso_w = tile_w;
-    const float iso_h_step = tile_h / 2.0f;
-
-    const float half_iso_w = iso_w / 2.0f;
-    const float half_iso_h_step = iso_h_step / 2.0f;
-
-    // Map origin (matches Tilemap_Render start position)
-    const float origin_x = ((float)(tilemap->height - 1) * iso_w) / 2.0f + half_iso_w;
-    constexpr float origin_y = 0.0f;
-
-    // Mouse relative to origin
-    const float rel_x = screen_x - origin_x;
-    const float rel_y = screen_y - origin_y;
-
-    // Inverse isometric projection
-    const float term_a = rel_x / half_iso_w;
-    const float term_b = rel_y / half_iso_h_step;
-
-    const float cart_x = (term_a + term_b) / 2.0f;
-    const float cart_y = (term_b - term_a) / 2.0f;
-
-    return (SDL_Point){.x = (int)SDL_floorf(cart_x), .y = (int)SDL_floorf(cart_y)};
+    const MisoIsoMapDesc desc = {
+        .width_tiles = tilemap->width,
+        .height_tiles = tilemap->height,
+        .tile_w_px = (int)tilemap->tileset->tile_width,
+        .tile_h_px = (int)tilemap->tileset->tile_height,
+    };
+    int tile_x = 0;
+    int tile_y = 0;
+    miso_iso_world_to_tile_floor(&desc, screen_x, screen_y, &tile_x, &tile_y);
+    return (SDL_Point){.x = tile_x, .y = tile_y};
 }
 
 // =============================================================================

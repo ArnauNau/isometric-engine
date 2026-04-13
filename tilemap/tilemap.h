@@ -15,6 +15,8 @@
 #ifndef TILEMAP_H
 #define TILEMAP_H
 
+#include "miso_iso.h"
+
 #include <SDL3/SDL.h>
 
 // =============================================================================
@@ -244,12 +246,13 @@ Tileset_GetIsoDimensions(const Tileset *const tileset, float *const iso_width, f
  */
 static inline void Tilemap_TileToWorld(
     const Tilemap *const tilemap, const int tile_x, const int tile_y, float *const world_x, float *const world_y) {
-    const float iso_w = (float)tilemap->tileset->tile_width;
-    const float iso_h = (float)tilemap->tileset->tile_height / 2.0f;
-    const float start_x = ((float)(tilemap->height - 1) * iso_w) / 2.0f;
-
-    *world_x = start_x + (float)(tile_x - tile_y) * iso_w / 2.0f;
-    *world_y = (float)(tile_x + tile_y) * (iso_h / 2.0f);
+    const MisoIsoMapDesc desc = {
+        .width_tiles = tilemap->width,
+        .height_tiles = tilemap->height,
+        .tile_w_px = (int)tilemap->tileset->tile_width,
+        .tile_h_px = (int)tilemap->tileset->tile_height,
+    };
+    miso_iso_tile_to_world(&desc, tile_x, tile_y, world_x, world_y);
 }
 
 /**

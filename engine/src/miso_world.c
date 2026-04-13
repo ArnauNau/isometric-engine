@@ -1,10 +1,9 @@
 #include "miso_world.h"
 
 #include "internal/miso__world_internal.h"
+#include "miso_iso.h"
 
 #include <SDL3/SDL.h>
-#include <math.h>
-#include <string.h>
 
 static bool miso__in_bounds(const MisoWorld *const world, const int tx, const int ty) {
     return world && tx >= 0 && ty >= 0 && tx < world->map.width_tiles && ty < world->map.height_tiles;
@@ -79,21 +78,9 @@ bool miso_world_screen_to_tile(const MisoWorld *const world,
 
     const MisoVec2 world_pos = miso_camera_screen_to_world(engine, camera_id, sx, sy);
 
-    const float iso_w = (float)world->map.tile_w_px;
-    const float iso_h = (float)world->map.tile_h_px * 0.5f;
-    const float start_x = ((float)(world->map.height_tiles - 1) * iso_w) * 0.5f;
-    const float anchor_x = iso_w * 0.5f;
-    const float anchor_y = iso_h * 0.5f;
-    const float local_x = world_pos.x - anchor_x;
-    const float local_y = world_pos.y - anchor_y;
-
-    const float a = (local_x - start_x) / (iso_w * 0.5f);
-    const float b = local_y / (iso_h * 0.5f);
-
-    const float txf = (a + b) * 0.5f;
-    const float tyf = (b - a) * 0.5f;
-    const int tx = (int)SDL_roundf(txf);
-    const int ty = (int)SDL_roundf(tyf);
+    int tx = 0;
+    int ty = 0;
+    miso_iso_world_to_tile_floor(&world->map, world_pos.x, world_pos.y, &tx, &ty);
 
     *out_tx = tx;
     *out_ty = ty;
