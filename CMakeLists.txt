@@ -2,6 +2,7 @@ cmake_minimum_required(VERSION 3.30)
 project(miso C)
 
 set(CMAKE_C_STANDARD 23)
+enable_testing()
 
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -63,6 +64,14 @@ set(MISO_GAME_CAFE_SOURCES
     prototypes/cafe-tycoon-proto/src/sim/miso_game_cafe.c
 )
 
+set(MISO_TEST_SOURCES
+    tests/test_tile_picking.c
+)
+
+set(MISO_ENGINE_TEST_SOURCES
+    tests/test_miso_iso.c
+)
+
 add_library(miso_core STATIC ${MISO_CORE_SOURCES})
 add_library(miso_game_cafe STATIC ${MISO_GAME_CAFE_SOURCES})
 
@@ -100,15 +109,33 @@ target_link_libraries(miso_game_cafe
 add_executable(miso_proto_cafe
     prototypes/cafe-tycoon-proto/src/main.c
 )
+add_executable(miso_unit_tests
+    ${MISO_TEST_SOURCES}
+)
+add_executable(miso_engine_tests
+    ${MISO_ENGINE_TEST_SOURCES}
+)
 miso_apply_compile_options(miso_proto_cafe)
+miso_apply_compile_options(miso_unit_tests)
+miso_apply_compile_options(miso_engine_tests)
 
 target_include_directories(miso_proto_cafe PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/engine/include
     ${CMAKE_CURRENT_SOURCE_DIR}/prototypes/cafe-tycoon-proto/include
 )
+target_include_directories(miso_unit_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine/src
+)
+target_include_directories(miso_engine_tests PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/engine/include
+)
 
 target_link_libraries(miso_proto_cafe PRIVATE miso_core miso_game_cafe)
+target_link_libraries(miso_unit_tests PRIVATE miso_core)
+target_link_libraries(miso_engine_tests PRIVATE miso_core)
 
 if(MISO_BUILD_TESTBED)
     add_executable(miso_testbed
@@ -126,12 +153,16 @@ endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     target_link_options(miso_proto_cafe PRIVATE -fsanitize=address,undefined -fsanitize-address-use-after-scope)
+    target_link_options(miso_unit_tests PRIVATE -fsanitize=address,undefined -fsanitize-address-use-after-scope)
+    target_link_options(miso_engine_tests PRIVATE -fsanitize=address,undefined -fsanitize-address-use-after-scope)
     if(TARGET miso_testbed)
         target_link_options(miso_testbed PRIVATE -fsanitize=address,undefined -fsanitize-address-use-after-scope)
     endif()
     message(STATUS "Debug build: sanitizers ON, optimization OFF, MISO_DEBUG defined")
 elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
     target_link_options(miso_proto_cafe PRIVATE -flto)
+    target_link_options(miso_unit_tests PRIVATE -flto)
+    target_link_options(miso_engine_tests PRIVATE -flto)
     if(TARGET miso_testbed)
         target_link_options(miso_testbed PRIVATE -flto)
     endif()
@@ -202,6 +233,25 @@ add_custom_target(miso_boundary_lint
 )
 
 add_dependencies(miso_proto_cafe miso_boundary_lint)
+add_test(NAME miso_iso_tile_to_world
+    COMMAND miso_engine_tests --case tile-to-world
+)
+add_test(NAME miso_iso_world_to_tile_center
+    COMMAND miso_engine_tests --case world-to-tile-center
+)
+add_test(NAME miso_iso_world_to_tile_floor_boundary
+    COMMAND miso_engine_tests --case world-to-tile-floor-boundary
+)
+add_test(NAME miso_testbed_hidpi_tile_pick
+    COMMAND miso_unit_tests --case testbed-hidpi
+)
+add_test(NAME miso_world_pixel_tile_pick_parity
+    COMMAND miso_unit_tests --case world-pixel-parity
+)
+add_test(NAME miso_cafe_hidpi_tile_pick
+    COMMAND miso_unit_tests --case cafe-hidpi
+)
+
 if(TARGET miso_testbed)
     add_custom_target(miso_testbed_boundary_lint
         COMMAND ${CMAKE_COMMAND}
