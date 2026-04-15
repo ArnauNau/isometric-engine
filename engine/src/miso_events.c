@@ -1,5 +1,4 @@
 #include "internal/miso__engine_internal.h"
-#include "internal/miso__renderer_backend.h"
 #include "miso_engine.h"
 
 #include <SDL3/SDL.h>

@@ -124,15 +124,9 @@ void miso__engine_apply_resize_if_needed(MisoEngine *engine, int pixel_width, in
     engine->applied_resize_width = pixel_width;
     engine->applied_resize_height = pixel_height;
     engine->has_applied_resize = true;
-    for (uint32_t i = 0; i < engine->camera_count; i++) {
-        MisoCameraState *const camera = &engine->cameras[i];
-        if (camera->used) {
-            camera->viewport.x = 0;
-            camera->viewport.y = 0;
-            camera->viewport.w = pixel_width;
-            camera->viewport.h = pixel_height;
-        }
-    }
+    engine->config.window_width = pixel_width;
+    engine->config.window_height = pixel_height;
+    miso__camera_resolve_normalized_viewports(engine, pixel_width, pixel_height);
     miso__renderer_resize(pixel_width, pixel_height);
 }
 
@@ -165,12 +159,9 @@ static void miso__render_registered_game(MisoEngine *const engine) {
     }
 }
 
-static void miso__render_registered_game_without_debug(MisoEngine *const engine) {
+static void miso__render_registered_game_world_only(MisoEngine *const engine) {
     if (engine->game_registered && engine->game_hooks.on_render_world) {
         engine->game_hooks.on_render_world(engine->game_ctx, engine);
-    }
-    if (engine->game_registered && engine->game_hooks.on_render_ui) {
-        engine->game_hooks.on_render_ui(engine->game_ctx, engine);
     }
 }
 
@@ -215,10 +206,10 @@ static void miso__render_immediate_if_possible(MisoEngine *const engine) {
     /*
      * Live-resize redraw is intentionally a weaker contract than a normal
      * frame. The goal is to keep the world visually current and avoid the OS
-     * stretching a stale frame; callers should not rely on UI/debug matching a
-     * full miso_end_frame() render while the resize interaction is in flight.
+     * stretching a stale frame without paying UI/debug costs during the resize
+     * interaction.
      */
-    miso__render_registered_game_without_debug(engine);
+    miso__render_registered_game_world_only(engine);
     miso__renderer_end_frame();
     engine->render_in_progress = false;
     if (rendered_during_frame) {
