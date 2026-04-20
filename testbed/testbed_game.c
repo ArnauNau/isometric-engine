@@ -224,7 +224,7 @@ static void testbed_sync_window_metrics(TestbedGame *const game) {
     game->pixel_ratio = new_density;
 
     if (size_changed || density_changed) {
-        miso_camera_set_viewport(game->engine, game->camera_id, 0, 0, game->screen_width, game->screen_height);
+        miso_camera_set_viewport_normalized(game->engine, game->camera_id, 0.0f, 0.0f, 1.0f, 1.0f);
     }
 }
 
