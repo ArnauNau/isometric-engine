@@ -12,6 +12,8 @@ typedef struct MisoCameraState {
     float y;
     float zoom;
     SDL_Rect viewport;
+    bool viewport_normalized;
+    MisoViewportRect normalized_viewport;
     bool pixel_snap;
 } MisoCameraState;
 
@@ -53,6 +55,7 @@ struct MisoEngine {
 void miso__engine_request_quit(MisoEngine *engine);
 void miso__engine_apply_resize_if_needed(MisoEngine *engine, int pixel_width, int pixel_height);
 bool miso__engine_should_dispatch_resize_event(MisoEngine *engine, int pixel_width, int pixel_height);
+void miso__camera_resolve_normalized_viewports(MisoEngine *engine, int pixel_width, int pixel_height);
 MisoCameraState *miso__camera_get(MisoEngine *engine, MisoCameraId id);
 const MisoCameraState *miso__camera_get_const(const MisoEngine *engine, MisoCameraId id);
 void miso__camera_get_view_projection(const MisoEngine *engine, MisoCameraId id, float out_matrix[16]);

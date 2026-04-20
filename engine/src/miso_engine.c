@@ -520,6 +520,8 @@ MisoCameraId miso_camera_create(MisoEngine *engine) {
     camera->viewport.y = 0;
     camera->viewport.w = engine->config.window_width;
     camera->viewport.h = engine->config.window_height;
+    camera->viewport_normalized = false;
+    camera->normalized_viewport = (MisoViewportRect){0.0f, 0.0f, 1.0f, 1.0f};
 
     engine->camera_count++;
     return engine->camera_count;
