@@ -36,7 +36,6 @@ endfunction()
 
 set(MISO_CORE_SOURCES
     profiler.c
-    camera/camera.c
     ecs/entity.c
     ecs/sparse_set.c
     ecs/ecs.c

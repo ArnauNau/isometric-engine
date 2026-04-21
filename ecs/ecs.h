@@ -4,11 +4,9 @@
 
 #ifndef MISO_ECS_H
 #define MISO_ECS_H
-#include "sparse_set.h"
+#include "entity.h"
 
 typedef struct ECSWorld_ {
-    SparseSet cameras;      // Camera2D_Component
-    SparseSet smooth_zooms; // SmoothZoom_Component
     bool entities[ENTITY_MAX];
 } ECSWorld;
 
