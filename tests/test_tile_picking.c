@@ -220,9 +220,84 @@ static int run_cafe_hidpi_case(void) {
     return 0;
 }
 
+static int run_resize_dispatch_dedupe_case(void) {
+    MisoEngine engine = {0};
+
+    if (!miso__engine_should_dispatch_resize_event(&engine, 1280, 720)) {
+        return failf("first resize event was suppressed");
+    }
+    if (miso__engine_should_dispatch_resize_event(&engine, 1280, 720)) {
+        return failf("duplicate resize event was not suppressed");
+    }
+    if (!miso__engine_should_dispatch_resize_event(&engine, 1920, 1080)) {
+        return failf("changed resize event was suppressed");
+    }
+    if (miso__engine_should_dispatch_resize_event(&engine, 1920, 1080)) {
+        return failf("second duplicate resize event was not suppressed");
+    }
+    if (!miso__engine_should_dispatch_resize_event(&engine, 0, -5)) {
+        return failf("sanitized resize event was suppressed");
+    }
+    if (miso__engine_should_dispatch_resize_event(&engine, 1, 1)) {
+        return failf("sanitized duplicate resize event was not suppressed");
+    }
+
+    return 0;
+}
+
+static int run_normalized_viewport_case(void) {
+    MisoEngine engine = {0};
+    engine.config.window_width = 1920;
+    engine.config.window_height = 1080;
+
+    const MisoCameraId camera_id = miso_camera_create(&engine);
+    if (camera_id == 0) {
+        return failf("failed to create camera");
+    }
+
+    miso_camera_set_viewport_normalized(&engine, camera_id, 0.0f, 0.0f, 1.0f, 1.0f);
+    MisoCameraState *camera = miso__camera_get(&engine, camera_id);
+    if (!camera || camera->viewport.x != 0 || camera->viewport.y != 0 || camera->viewport.w != 1920 ||
+        camera->viewport.h != 1080) {
+        SDL_free(engine.cameras);
+        return failf("full normalized viewport did not resolve to full window");
+    }
+
+    miso_camera_set_viewport_normalized(&engine, camera_id, 0.5f, 0.0f, 0.5f, 1.0f);
+    camera = miso__camera_get(&engine, camera_id);
+    if (!camera || camera->viewport.x != 960 || camera->viewport.y != 0 || camera->viewport.w != 960 ||
+        camera->viewport.h != 1080) {
+        SDL_free(engine.cameras);
+        return failf("right-half normalized viewport did not resolve correctly");
+    }
+
+    miso__camera_resolve_normalized_viewports(&engine, 1280, 720);
+    camera = miso__camera_get(&engine, camera_id);
+    if (!camera || camera->viewport.x != 640 || camera->viewport.y != 0 || camera->viewport.w != 640 ||
+        camera->viewport.h != 720) {
+        SDL_free(engine.cameras);
+        return failf("normalized viewport did not update after resize");
+    }
+
+    miso_camera_set_viewport(&engine, camera_id, 10, 20, 300, 200);
+    miso__camera_resolve_normalized_viewports(&engine, 640, 360);
+    camera = miso__camera_get(&engine, camera_id);
+    if (!camera || camera->viewport.x != 10 || camera->viewport.y != 20 || camera->viewport.w != 300 ||
+        camera->viewport.h != 200) {
+        SDL_free(engine.cameras);
+        return failf("pixel viewport was changed by normalized viewport resolver");
+    }
+
+    SDL_free(engine.cameras);
+    return 0;
+}
+
 int main(const int argc, const char *const *const argv) {
     if (argc != 3 || SDL_strcmp(argv[1], "--case") != 0) {
-        fprintf(stderr, "usage: %s --case <testbed-hidpi|world-pixel-parity|cafe-hidpi>\n", argv[0]);
+        fprintf(stderr,
+                "usage: %s --case "
+                "<testbed-hidpi|world-pixel-parity|cafe-hidpi|resize-dispatch-dedupe|normalized-viewport>\n",
+                argv[0]);
         return 2;
     }
 
@@ -234,6 +309,12 @@ int main(const int argc, const char *const *const argv) {
     }
     if (SDL_strcmp(argv[2], "cafe-hidpi") == 0) {
         return run_cafe_hidpi_case();
+    }
+    if (SDL_strcmp(argv[2], "resize-dispatch-dedupe") == 0) {
+        return run_resize_dispatch_dedupe_case();
+    }
+    if (SDL_strcmp(argv[2], "normalized-viewport") == 0) {
+        return run_normalized_viewport_case();
     }
 
     fprintf(stderr, "unknown test case: %s\n", argv[2]);
