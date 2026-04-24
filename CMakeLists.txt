@@ -36,7 +36,7 @@ function(miso_apply_compile_options target_name)
 endfunction()
 
 set(MISO_CORE_SOURCES
-    profiler.c
+    engine/src/miso_profiler.c
     ecs/entity.c
     ecs/sparse_set.c
     ecs/ecs.c

@@ -5,7 +5,9 @@
 #include "internal/miso__renderer_backend.h"
 #include "logger.h"
 #include "miso_events.h"
+#include "miso_profiler.h"
 #include "miso_render.h"
+#include "miso_render_diagnostics.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3_image/SDL_image.h>
@@ -149,19 +151,27 @@ bool miso__engine_should_dispatch_resize_event(MisoEngine *engine, int pixel_wid
 
 static void miso__render_registered_game(MisoEngine *const engine) {
     if (engine->game_registered && engine->game_hooks.on_render_world) {
+        miso_profiler_begin(engine, MISO_PROFILER_ENGINE_RENDER_WORLD);
         engine->game_hooks.on_render_world(engine->game_ctx, engine);
+        miso_profiler_end(engine, MISO_PROFILER_ENGINE_RENDER_WORLD);
     }
     if (engine->game_registered && engine->game_hooks.on_render_ui) {
+        miso_profiler_begin(engine, MISO_PROFILER_ENGINE_RENDER_UI);
         engine->game_hooks.on_render_ui(engine->game_ctx, engine);
+        miso_profiler_end(engine, MISO_PROFILER_ENGINE_RENDER_UI);
     }
     if (engine->game_registered && engine->game_hooks.on_render_debug) {
+        miso_profiler_begin(engine, MISO_PROFILER_ENGINE_RENDER_DEBUG);
         engine->game_hooks.on_render_debug(engine->game_ctx, engine);
+        miso_profiler_end(engine, MISO_PROFILER_ENGINE_RENDER_DEBUG);
     }
 }
 
 static void miso__render_registered_game_world_only(MisoEngine *const engine) {
     if (engine->game_registered && engine->game_hooks.on_render_world) {
+        miso_profiler_begin(engine, MISO_PROFILER_ENGINE_RENDER_WORLD);
         engine->game_hooks.on_render_world(engine->game_ctx, engine);
+        miso_profiler_end(engine, MISO_PROFILER_ENGINE_RENDER_WORLD);
     }
 }
 
@@ -324,7 +334,17 @@ MisoResult miso_create(const MisoConfig *cfg, MisoEngine **out_engine) {
     SDL_SetAtomicInt(&engine->pending_resize_height, 0);
     SDL_SetAtomicInt(&engine->pending_resize_dirty, 0);
 
+    if (miso_profiler_init(engine) != MISO_OK) {
+        miso__renderer_ui_shutdown();
+        miso__renderer_shutdown();
+        SDL_DestroyWindow(engine->window);
+        SDL_Quit();
+        SDL_free(engine);
+        return MISO_ERR_OUT_OF_MEMORY;
+    }
+
     if (!miso__ensure_camera_capacity(engine)) {
+        miso_profiler_shutdown(engine);
         miso__renderer_ui_shutdown();
         miso__renderer_shutdown();
         SDL_DestroyWindow(engine->window);
@@ -346,6 +366,7 @@ void miso_destroy(MisoEngine *engine) {
 
     SDL_RemoveEventWatch(miso__live_resize_event_watch, engine);
 
+    miso_profiler_shutdown(engine);
     miso__renderer_ui_shutdown();
     miso__render_shutdown();
     miso__renderer_shutdown();
@@ -366,6 +387,7 @@ bool miso_begin_frame(MisoEngine *const engine) {
 
     engine->frame_in_progress = true;
     engine->rendered_from_event_watch_this_frame = false;
+    miso_profiler_frame_start(engine);
     miso__drain_pending_resize(engine);
 
     const uint64_t now = SDL_GetPerformanceCounter();
@@ -387,6 +409,7 @@ void miso_end_frame(MisoEngine *const engine) {
     if (engine->rendered_from_event_watch_this_frame) {
         engine->rendered_from_event_watch_this_frame = false;
         engine->frame_in_progress = false;
+        miso_profiler_frame_end(engine);
         return;
     }
 
@@ -394,8 +417,16 @@ void miso_end_frame(MisoEngine *const engine) {
     miso__renderer_begin_frame();
     miso__render_registered_game(engine);
     miso__renderer_end_frame();
+    MisoRenderFrameStats frame_stats = {0};
+    if (miso_render_diag_get_frame_stats(engine, &frame_stats)) {
+        miso_profiler_set_duration(
+            engine, MISO_PROFILER_ENGINE_RENDERER_ACQUIRE, frame_stats.timing.acquire_swapchain_ms);
+        miso_profiler_set_duration(engine, MISO_PROFILER_ENGINE_RENDERER_RECORD, frame_stats.timing.record_commands_ms);
+        miso_profiler_set_duration(engine, MISO_PROFILER_ENGINE_RENDERER_SUBMIT, frame_stats.timing.submit_ms);
+    }
     engine->render_in_progress = false;
     engine->frame_in_progress = false;
+    miso_profiler_frame_end(engine);
 }
 
 void miso_get_window_size_pixels(const MisoEngine *const engine, int *const out_width, int *const out_height) {
@@ -420,6 +451,7 @@ void miso_run_simulation_ticks(MisoEngine *engine, const MisoSimTickFn tick_fn, 
     const double fixed_step = 1.0 / (double)engine->config.sim_tick_hz;
     int steps = 0;
 
+    miso_profiler_begin(engine, MISO_PROFILER_ENGINE_FIXED_TICKS);
     while (engine->sim_accumulator >= fixed_step && steps < engine->config.max_sim_steps_per_frame) {
         const float fixed_dt = (float)fixed_step;
         if (tick_fn) {
@@ -436,6 +468,7 @@ void miso_run_simulation_ticks(MisoEngine *engine, const MisoSimTickFn tick_fn, 
     if (engine->sim_accumulator < 0.0) {
         engine->sim_accumulator = 0.0;
     }
+    miso_profiler_end(engine, MISO_PROFILER_ENGINE_FIXED_TICKS);
 }
 
 float miso_get_real_delta_seconds(const MisoEngine *engine) {

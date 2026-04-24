@@ -17,6 +17,8 @@ typedef struct MisoCameraState {
     bool pixel_snap;
 } MisoCameraState;
 
+typedef struct MisoProfilerState MisoProfilerState;
+
 struct MisoEngine {
     MisoConfig config;
     SDL_Window *window;
@@ -37,6 +39,8 @@ struct MisoEngine {
     MisoCameraState *cameras;
     uint32_t camera_capacity;
     uint32_t camera_count;
+
+    MisoProfilerState *profiler;
 
     bool frame_in_progress;
     bool render_in_progress;

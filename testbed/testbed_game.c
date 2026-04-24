@@ -3,10 +3,10 @@
 #include "game_clock.h"
 #include "miso_camera.h"
 #include "miso_debug_ui.h"
+#include "miso_profiler.h"
 #include "miso_render.h"
 #include "miso_render_diagnostics.h"
 #include "miso_text.h"
-#include "profiler.h"
 #include "tilemap/tilemap.h"
 #include "vendored/nuklear/nuklear.h"
 
@@ -91,6 +91,9 @@ struct TestbedGame {
 
     MisoFontHandle hud_font;
     MisoTextHandle hud_texts[TESTBED_HUD_TEXT_COUNT];
+    MisoProfilerCategoryId profiler_render_map;
+    MisoProfilerCategoryId profiler_render_buildings;
+    MisoProfilerCategoryId profiler_render_wireframes;
 
     bool benchmark_mode;
     bool benchmark_debug_ui_enabled;
@@ -540,16 +543,16 @@ fail:
 }
 
 static void testbed_render_buildings(TestbedGame *const game) {
-    PROF_start(PROFILER_RENDER_BUILDINGS);
+    miso_profiler_begin(game ? game->engine : nullptr, game ? game->profiler_render_buildings : 0);
 
     if (!game || !game->tilemap) {
-        PROF_stop(PROFILER_RENDER_BUILDINGS);
+        miso_profiler_end(game ? game->engine : nullptr, game ? game->profiler_render_buildings : 0);
         return;
     }
 
     const int needed_instances = game->building_count + 1;
     if (!testbed_ensure_building_instance_capacity(game, needed_instances)) {
-        PROF_stop(PROFILER_RENDER_BUILDINGS);
+        miso_profiler_end(game->engine, game->profiler_render_buildings);
         return;
     }
 
@@ -604,7 +607,7 @@ static void testbed_render_buildings(TestbedGame *const game) {
 
     miso_render_diag_submit_native_sprites(game->engine, game->tilemap->tileset->texture, instances, instance_count);
 
-    PROF_stop(PROFILER_RENDER_BUILDINGS);
+    miso_profiler_end(game->engine, game->profiler_render_buildings);
 }
 
 static void testbed_spawn_boat(TestbedGame *const game, const int x, const int y) {
@@ -657,7 +660,7 @@ static void testbed_spawn_boats(TestbedGame *const game, const int amount) {
     int count = 0;
     for (int y = game->tilemap->height - 1; y >= 2; y -= 3) {
         for (int x = 0; x < game->tilemap->width; x++) {
-            if (unlikely(count >= amount || game->building_count >= MAX_BUILDINGS)) {
+            if (count >= amount || game->building_count >= MAX_BUILDINGS) {
                 return;
             }
 
@@ -718,11 +721,11 @@ static void testbed_game_on_event(void *const ctx, const MisoEvent *const event)
     }
 
     if (!game->benchmark_mode || game->benchmark_debug_ui_enabled) {
-        PROF_stop(PROFILER_EVENT_HANDLING);
-        PROF_start(PROFILER_NUKLEAR);
+        miso_profiler_end(game->engine, MISO_PROFILER_ENGINE_EVENTS);
+        miso_profiler_begin(game->engine, MISO_PROFILER_ENGINE_DEBUG_UI);
         const bool consumed = miso_debug_ui_feed_event(event);
-        PROF_stop(PROFILER_NUKLEAR);
-        PROF_start(PROFILER_EVENT_HANDLING);
+        miso_profiler_end(game->engine, MISO_PROFILER_ENGINE_DEBUG_UI);
+        miso_profiler_begin(game->engine, MISO_PROFILER_ENGINE_EVENTS);
         if (consumed) {
             return;
         }
@@ -909,9 +912,9 @@ static void testbed_game_on_render_world(void *const ctx, const MisoEngine *cons
         engine, game->game_clock.total, game->wave_speed, game->wave_amplitude, game->wave_phase);
 
     if (testbed_should_render_world(game)) {
-        PROF_start(PROFILER_RENDER_MAP);
+        miso_profiler_begin(game->engine, game->profiler_render_map);
         Tilemap_Render(game->tilemap);
-        PROF_stop(PROFILER_RENDER_MAP);
+        miso_profiler_end(game->engine, game->profiler_render_map);
 
         testbed_render_buildings(game);
         testbed_render_tile_highlight(
@@ -926,7 +929,7 @@ static void testbed_game_on_render_world(void *const ctx, const MisoEngine *cons
     }
 
     if (testbed_should_render_wire(game)) {
-        PROF_start(PROFILER_RENDER_WIREFRAMES);
+        miso_profiler_begin(game->engine, game->profiler_render_wireframes);
         size_t total_vertex_count = 0;
         for (int i = 0; i < game->building_count; i++) {
             total_vertex_count += (size_t)game->wireframe_meshes[i].vertex_count;
@@ -951,7 +954,7 @@ static void testbed_game_on_render_world(void *const ctx, const MisoEngine *cons
                     game->engine, game->wireframe_line_scratch, (int)offset_vertices, 0x00FFFFFFu);
             }
         }
-        PROF_stop(PROFILER_RENDER_WIREFRAMES);
+        miso_profiler_end(game->engine, game->profiler_render_wireframes);
     }
 
     miso_render_end_world(engine);
@@ -963,7 +966,6 @@ static void testbed_game_on_render_ui(void *const ctx, const MisoEngine *const e
         return;
     }
 
-    PROF_start(PROFILER_RENDER_UI);
     miso_render_begin_ui(engine);
 
     float ui_y_pos = 20.0f;
@@ -988,7 +990,7 @@ static void testbed_game_on_render_ui(void *const ctx, const MisoEngine *const e
         float min = 0.0f;
         float max = 0.0f;
         float avg = 0.0f;
-        PROF_getFPS(&min, &avg, &max);
+        miso_profiler_get_fps(game->engine, &min, &avg, &max);
         SDL_snprintf(fps_str, sizeof(fps_str), "FPS: min %4.0f | avg %4.0f | max %4.0f", min, avg, max);
     } else {
         const float fps = game->frame_dt > 0.0f ? (1.0f / game->frame_dt) : 0.0f;
@@ -998,7 +1000,7 @@ static void testbed_game_on_render_ui(void *const ctx, const MisoEngine *const e
     ui_y_pos += 34.0f;
 
     if (game->debug_mode && (!game->benchmark_mode || game->benchmark_profiler_enabled)) {
-        PROF_render(game->engine, (SDL_FPoint){10.0f, ui_y_pos});
+        miso_profiler_overlay_render(game->engine, (SDL_FPoint){10.0f, ui_y_pos});
     }
 
     char mouse_pos_info[64];
@@ -1006,7 +1008,6 @@ static void testbed_game_on_render_ui(void *const ctx, const MisoEngine *const e
     testbed_render_hud_line(game, 3, game->mouse_x + 15.0f, game->mouse_y + 15.0f, mouse_pos_info);
 
     miso_render_end_ui(engine);
-    PROF_stop(PROFILER_RENDER_UI);
 }
 
 static void testbed_game_on_render_debug(void *const ctx, const MisoEngine *const engine) {
@@ -1015,7 +1016,7 @@ static void testbed_game_on_render_debug(void *const ctx, const MisoEngine *cons
         return;
     }
 
-    PROF_start(PROFILER_NUKLEAR);
+    miso_profiler_begin((MisoEngine *)engine, MISO_PROFILER_ENGINE_DEBUG_UI);
     miso_debug_ui_prepare_render(engine);
 
     struct nk_context *nk = miso_debug_ui_get_context();
@@ -1200,7 +1201,7 @@ static void testbed_game_on_render_debug(void *const ctx, const MisoEngine *cons
     }
     nk_end(nk);
     miso_debug_ui_render(engine);
-    PROF_stop(PROFILER_NUKLEAR);
+    miso_profiler_end((MisoEngine *)engine, MISO_PROFILER_ENGINE_DEBUG_UI);
 }
 
 static MisoResult testbed_game_on_save(const void *const game_ctx,
@@ -1373,7 +1374,19 @@ MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
         }
     }
 
-    PROF_initUI(engine, game->hud_font);
+    (void)miso_profiler_register_game_category_child(
+        engine, MISO_PROFILER_ENGINE_RENDER_WORLD, "testbed.render_map", 0xD8E65AFFu, &game->profiler_render_map);
+    (void)miso_profiler_register_game_category_child(engine,
+                                                     MISO_PROFILER_ENGINE_RENDER_WORLD,
+                                                     "testbed.render_buildings",
+                                                     0x78E65AFFu,
+                                                     &game->profiler_render_buildings);
+    (void)miso_profiler_register_game_category_child(engine,
+                                                     MISO_PROFILER_ENGINE_RENDER_WORLD,
+                                                     "testbed.render_wireframes",
+                                                     0x5AE6C8FFu,
+                                                     &game->profiler_render_wireframes);
+    miso_profiler_overlay_init(engine, game->hud_font);
 
     char resource_path[512] = {0};
     game->tileset = Tileset_Load(testbed_get_resource_path(resource_path, "isometric-sheet.png"), TILE_SIZE, TILE_SIZE);
@@ -1421,7 +1434,7 @@ void testbed_game_destroy(TestbedGame *game) {
         Tileset_Destroy(game->tileset);
     }
 
-    PROF_deinitUI(game->engine);
+    miso_profiler_overlay_shutdown(game->engine);
     for (int i = 0; i < TESTBED_HUD_TEXT_COUNT; i++) {
         miso_text_destroy(game->engine, game->hud_texts[i]);
         game->hud_texts[i] = 0;
@@ -1449,8 +1462,7 @@ void testbed_game_frame_begin(TestbedGame *game, const float real_dt_seconds) {
 
     game->frame_dt = real_dt_seconds;
     GameClock_update(&game->game_clock, real_dt_seconds);
-    PROF_frameStart();
-    PROF_start(PROFILER_EVENT_HANDLING);
+    miso_profiler_begin(game->engine, MISO_PROFILER_ENGINE_EVENTS);
     if (!game->benchmark_mode || game->benchmark_debug_ui_enabled) {
         miso_debug_ui_begin_input();
     }
@@ -1463,18 +1475,11 @@ void testbed_game_frame_end_events(TestbedGame *game) {
     if (!game->benchmark_mode || game->benchmark_debug_ui_enabled) {
         miso_debug_ui_end_input();
     }
-    PROF_stop(PROFILER_EVENT_HANDLING);
+    miso_profiler_end(game->engine, MISO_PROFILER_ENGINE_EVENTS);
 }
 
 void testbed_game_frame_end(const TestbedGame *const game) {
-    if (game && game->engine) {
-        MisoRenderFrameStats stats = {0};
-        if (miso_render_diag_get_frame_stats(game->engine, &stats)) {
-            PROF_setDuration(PROFILER_WAIT_FRAME, stats.timing.acquire_swapchain_ms);
-            PROF_setDuration(PROFILER_GPU, stats.timing.submit_ms);
-        }
-    }
-    PROF_frameEnd();
+    (void)game;
 }
 
 void testbed_game_enable_benchmark_mode(TestbedGame *const game, const bool enabled) {

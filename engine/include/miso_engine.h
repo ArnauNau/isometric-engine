@@ -1,13 +1,12 @@
 #ifndef MISO_ENGINE_H
 #define MISO_ENGINE_H
 
-#include "miso_events.h"
+#include <SDL3/SDL.h>
 
-#define MISO_VERSION "0.1.0"
+#define MISO_VERSION "0.2.0"
 #define MISO_PATH_MAX 1024U
 
-#include <stddef.h>
-#include <stdint.h>
+#include "miso_events.h"
 
 typedef struct MisoEngine MisoEngine;
 
