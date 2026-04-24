@@ -12,3 +12,8 @@ assets/
 *.aseprite
 art-src/
 bench/
+*.md
+*.jpg
+*.svg
+*.png
+obsidian/

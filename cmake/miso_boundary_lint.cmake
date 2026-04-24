@@ -18,6 +18,10 @@ if(NOT DEFINED LINT_ENGINE_PORTABILITY)
   set(LINT_ENGINE_PORTABILITY ON)
 endif()
 
+if(NOT DEFINED GAME_CAFE_DIR)
+  set(GAME_CAFE_DIR "${SRC_DIR}/prototypes/cafe-tycoon-proto")
+endif()
+
 if(DEFINED RG_EXE AND NOT RG_EXE STREQUAL "")
   set(SEARCH_CMD "${RG_EXE}")
   set(SEARCH_HAS_REGEX ON)
@@ -97,11 +101,15 @@ if(LINT_CORE)
 endif()
 
 if(LINT_GAME_CAFE)
-  miso_boundary_lint(
-    "#include[[:space:]]+\".*engine/src/internal/"
-    "Boundary violation: miso_game_cafe includes engine internals"
-    PATHS "${SRC_DIR}/prototypes/cafe-tycoon-proto/include" "${SRC_DIR}/prototypes/cafe-tycoon-proto/src"
-  )
+  if(EXISTS "${GAME_CAFE_DIR}")
+    miso_boundary_lint(
+      "#include[[:space:]]+\".*engine/src/internal/"
+      "Boundary violation: miso_game_cafe includes engine internals"
+      PATHS "${GAME_CAFE_DIR}/include" "${GAME_CAFE_DIR}/src"
+    )
+  else()
+    message(STATUS "Skipping miso_game_cafe boundary lint; GAME_CAFE_DIR not found: ${GAME_CAFE_DIR}")
+  endif()
 endif()
 
 if(LINT_TESTBED)
