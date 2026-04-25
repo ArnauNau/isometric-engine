@@ -43,7 +43,6 @@ set(MISO_CORE_SOURCES
     renderer/renderer.c
     renderer/ui.c
     tilemap/tilemap.c
-    debug_ui.c
     engine/src/internal/miso__renderer_backend.c
     engine/src/miso_engine.c
     engine/src/miso_events.c
