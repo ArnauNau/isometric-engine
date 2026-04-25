@@ -23,6 +23,29 @@ static struct nk_context *nk_ctx = nullptr;
 static bool initialized = false;
 static float ui_scale = 1.0f;
 
+static void DebugUI_ApplyTransparentStyle(struct nk_context *const ctx) {
+    struct nk_color colors[NK_COLOR_COUNT];
+    SDL_memcpy(colors, nk_default_color_style, sizeof(colors));
+
+    colors[NK_COLOR_TEXT] = nk_rgba(235, 238, 240, 255);
+    colors[NK_COLOR_WINDOW].a = 178;
+    colors[NK_COLOR_HEADER].a = 205;
+    colors[NK_COLOR_BUTTON].a = 205;
+    colors[NK_COLOR_BUTTON_HOVER].a = 220;
+    colors[NK_COLOR_BUTTON_ACTIVE].a = 235;
+    colors[NK_COLOR_SELECT].a = 190;
+    colors[NK_COLOR_SELECT_ACTIVE].a = 220;
+    colors[NK_COLOR_SLIDER].a = 190;
+    colors[NK_COLOR_PROPERTY].a = 190;
+    colors[NK_COLOR_EDIT].a = 205;
+    colors[NK_COLOR_COMBO].a = 205;
+    colors[NK_COLOR_SCROLLBAR].a = 160;
+    colors[NK_COLOR_TAB_HEADER].a = 205;
+    colors[NK_COLOR_KNOB].a = 190;
+
+    nk_style_from_table(ctx, colors);
+}
+
 bool DebugUI_Init(const char *const font_path, const float font_size) {
     if (initialized)
         return true;
@@ -59,6 +82,8 @@ bool DebugUI_Init(const char *const font_path, const float font_size) {
     if (font) {
         nk_style_set_font(nk_ctx, &font->handle);
     }
+
+    DebugUI_ApplyTransparentStyle(nk_ctx);
 
     // Scale all style elements for HDPI
     // This scales padding, spacing, borders, etc.
