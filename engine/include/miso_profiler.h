@@ -4,10 +4,6 @@
 #include "miso_engine.h"
 #include "miso_text.h"
 
-#include <SDL3/SDL_rect.h>
-#include <stdbool.h>
-#include <stdint.h>
-
 #define MISO_PROFILER_HISTORY_COUNT 240
 #define MISO_PROFILER_CATEGORY_MAX 64
 #define MISO_PROFILER_CATEGORY_NAME_MAX 48

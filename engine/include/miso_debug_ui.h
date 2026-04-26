@@ -4,8 +4,6 @@
 #include "miso_engine.h"
 #include "miso_events.h"
 
-#include <stdbool.h>
-
 struct nk_context;
 
 MisoResult miso_debug_ui_init(const MisoEngine *engine, const char *font_path, float font_size);

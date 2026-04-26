@@ -3,9 +3,6 @@
 
 #include "miso_camera.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-
 typedef struct MisoWorld MisoWorld;
 
 typedef uint32_t MisoLotId;

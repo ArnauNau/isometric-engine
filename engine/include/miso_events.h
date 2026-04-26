@@ -1,8 +1,6 @@
 #ifndef MISO_EVENTS_H
 #define MISO_EVENTS_H
 
-#include <stdbool.h>
-#include <stdint.h>
 
 typedef enum MisoEventType {
     MISO_EVENT_NONE = 0,

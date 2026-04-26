@@ -4,9 +4,6 @@
 #include "miso_engine.h"
 #include "miso_render.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-
 /*
  * Advanced renderer diagnostics and tuning.
  * Not required for normal gameplay rendering.

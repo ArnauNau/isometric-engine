@@ -3,8 +3,6 @@
 
 #include "miso_engine.h"
 
-#include <stdint.h>
-
 typedef uint32_t MisoCameraId;
 
 typedef struct MisoVec2 {

@@ -3,8 +3,6 @@
 
 #include "miso_world.h"
 
-#include <stdint.h>
-
 typedef uint32_t MisoBuildingId;
 typedef uint32_t MisoBuildingTypeId;
 typedef struct MisoBuildingInfo {

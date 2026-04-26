@@ -4,9 +4,6 @@
 #include "miso_engine.h"
 #include "miso_render.h"
 
-#include <stdbool.h>
-#include <stdint.h>
-
 typedef uint32_t MisoTextHandle;
 
 typedef struct MisoTextMetrics {

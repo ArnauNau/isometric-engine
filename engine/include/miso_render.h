@@ -4,8 +4,6 @@
 #include "miso_camera.h"
 #include "miso_engine.h"
 
-#include <stdint.h>
-
 typedef uint32_t MisoTextureHandle;
 typedef uint32_t MisoFontHandle;
 

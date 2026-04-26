@@ -4,7 +4,6 @@
 #include "miso_engine.h"
 
 #include <SDL3/SDL.h>
-#include <stddef.h>
 
 bool miso__path_is_absolute(const char *path);
 bool miso__path_join(const char *root, const char *relative, char *out, size_t out_size);
