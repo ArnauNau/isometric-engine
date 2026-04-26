@@ -112,9 +112,12 @@ void Renderer_Shutdown(void);
 void Renderer_Resize(int width, int height);
 void Renderer_SetVSync(bool enabled);
 
-// Uploads a texture to the GPU and returns a handle (wrapper or index)
-// For simplicity, we'll return the SDL_GPUTexture* directly for now,
-// but in a real engine you'd want a resource handle.
+// Uploads an existing CPU surface to the GPU. The caller retains ownership of the surface.
+SDL_GPUTexture *Renderer_CreateTextureFromSurface(SDL_Surface *surface);
+
+// Loads a PNG/BMP with SDL's built-in surface loader, uploads it to the GPU, and returns a texture.
+// TODO(asset-loading): introduce an engine-owned image loader that can deliberately choose
+// SDL_LoadSurface or SDL_image per format/build mode before broadening supported runtime formats.
 SDL_GPUTexture *Renderer_LoadTexture(const char *path);
 void Renderer_DestroyTexture(SDL_GPUTexture *texture);
 

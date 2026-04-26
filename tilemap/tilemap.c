@@ -2,7 +2,6 @@
 
 #include "../renderer/renderer.h"
 
-#include <SDL3_image/SDL_image.h>
 #include <stdint.h>
 
 static inline int tilemap_cell_index(const Tilemap *const tilemap, const int x, const int y) {
@@ -88,35 +87,48 @@ static void tilemap_rebuild_render_cache(const Tilemap *const tilemap) {
 // =============================================================================
 
 Tileset *Tileset_Load(const char *const image_path, const unsigned int tile_width, const unsigned int tile_height) {
+    if (tile_width == 0U || tile_height == 0U) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Invalid tile size for tileset: %ux%u", tile_width, tile_height);
+        return nullptr;
+    }
+
     Tileset *const tileset = SDL_malloc(sizeof(Tileset));
     if (!tileset) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to allocate memory for tileset");
         return nullptr;
     }
 
-    // Load texture via renderer
-    tileset->texture = Renderer_LoadTexture(image_path);
-    if (!tileset->texture) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create texture from %s", image_path);
+    SDL_Surface *const surface = SDL_LoadSurface(image_path);
+    if (!surface) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load tileset image %s: %s", image_path, SDL_GetError());
         SDL_free(tileset);
         return nullptr;
     }
 
-    // Load image to get dimensions (init time only, acceptable overhead)
-    SDL_Surface *const surface = IMG_Load(image_path);
-    if (surface) {
-        tileset->columns = (unsigned int)surface->w / tile_width;
-        tileset->rows = (unsigned int)surface->h / tile_height;
-        SDL_DestroySurface(surface);
-    } else {
-        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION, "Could not load image for dimensions: %s", image_path);
-        tileset->columns = 0;
-        tileset->rows = 0;
-    }
-
+    const int surface_width = surface->w;
+    const int surface_height = surface->h;
+    tileset->columns = (unsigned int)surface_width / tile_width;
+    tileset->rows = (unsigned int)surface_height / tile_height;
     tileset->tile_width = tile_width;
     tileset->tile_height = tile_height;
     tileset->total_tiles = tileset->columns * tileset->rows;
+    tileset->texture = Renderer_CreateTextureFromSurface(surface);
+    if (!tileset->texture) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to create texture from %s", image_path);
+        SDL_DestroySurface(surface);
+        SDL_free(tileset);
+        return nullptr;
+    }
+    SDL_DestroySurface(surface);
+
+    if ((unsigned int)surface_width % tile_width != 0U || (unsigned int)surface_height % tile_height != 0U) {
+        SDL_LogWarn(SDL_LOG_CATEGORY_APPLICATION,
+                    "Tileset image dimensions are not exact multiples of tile size: %dx%d image, %ux%u tiles",
+                    surface_width,
+                    surface_height,
+                    tile_width,
+                    tile_height);
+    }
 
     SDL_Log("Loaded tileset: %ux%u tiles, %u columns, %u rows, %u total tiles",
             tile_width,

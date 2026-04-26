@@ -3,7 +3,6 @@
 #include "renderer_internal.h"
 
 #include <SDL3/SDL_log.h>
-#include <SDL3_image/SDL_image.h>
 #include <stdint.h>
 #include <string.h>
 
@@ -1136,10 +1135,9 @@ bool Renderer_GetUploadSuppressed(void) {
     return g_upload_suppressed;
 }
 
-SDL_GPUTexture *Renderer_LoadTexture(const char *const path) {
-    SDL_Surface *const surface = IMG_Load(path);
+SDL_GPUTexture *Renderer_CreateTextureFromSurface(SDL_Surface *const surface) {
     if (!surface) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load image %s: %s", path, SDL_GetError());
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Cannot create texture from null surface");
         return nullptr;
     }
 
@@ -1155,13 +1153,13 @@ SDL_GPUTexture *Renderer_LoadTexture(const char *const path) {
 
     SDL_GPUTexture *const texture = SDL_CreateGPUTexture(gpu_device, &tex_info);
     if (!texture) {
-        SDL_DestroySurface(surface);
+        SDL_LogError(SDL_LOG_CATEGORY_GPU, "Failed to create GPU texture: %s", SDL_GetError());
         return nullptr;
     }
 
     SDL_Surface *const converted = SDL_ConvertSurface(surface, SDL_PIXELFORMAT_ABGR8888);
     if (!converted) {
-        SDL_DestroySurface(surface);
+        SDL_LogError(SDL_LOG_CATEGORY_GPU, "Failed to convert texture surface: %s", SDL_GetError());
         SDL_ReleaseGPUTexture(gpu_device, texture);
         return nullptr;
     }
@@ -1181,12 +1179,17 @@ SDL_GPUTexture *Renderer_LoadTexture(const char *const path) {
     SDL_GPUTransferBuffer *const transfer_buffer = SDL_CreateGPUTransferBuffer(gpu_device, &transfer_info);
     if (!transfer_buffer) {
         SDL_DestroySurface(converted);
-        SDL_DestroySurface(surface);
         SDL_ReleaseGPUTexture(gpu_device, texture);
         return nullptr;
     }
 
     Uint8 *const map = (Uint8 *)SDL_MapGPUTransferBuffer(gpu_device, transfer_buffer, true);
+    if (!map) {
+        SDL_ReleaseGPUTransferBuffer(gpu_device, transfer_buffer);
+        SDL_DestroySurface(converted);
+        SDL_ReleaseGPUTexture(gpu_device, texture);
+        return nullptr;
+    }
     for (int y = 0; y < converted->h; y++) {
         const Uint8 *const src = (const Uint8 *)converted->pixels + converted->pitch * y;
         Uint8 *const dst = map + (Uint32)(y * converted->w * 4);
@@ -1195,7 +1198,20 @@ SDL_GPUTexture *Renderer_LoadTexture(const char *const path) {
     SDL_UnmapGPUTransferBuffer(gpu_device, transfer_buffer);
 
     SDL_GPUCommandBuffer *const upload_cmd = SDL_AcquireGPUCommandBuffer(gpu_device);
+    if (!upload_cmd) {
+        SDL_ReleaseGPUTransferBuffer(gpu_device, transfer_buffer);
+        SDL_DestroySurface(converted);
+        SDL_ReleaseGPUTexture(gpu_device, texture);
+        return nullptr;
+    }
     SDL_GPUCopyPass *const copy = SDL_BeginGPUCopyPass(upload_cmd);
+    if (!copy) {
+        SDL_CancelGPUCommandBuffer(upload_cmd);
+        SDL_ReleaseGPUTransferBuffer(gpu_device, transfer_buffer);
+        SDL_DestroySurface(converted);
+        SDL_ReleaseGPUTexture(gpu_device, texture);
+        return nullptr;
+    }
 
     const SDL_GPUTextureTransferInfo src_info = {
         .transfer_buffer = transfer_buffer,
@@ -1216,6 +1232,17 @@ SDL_GPUTexture *Renderer_LoadTexture(const char *const path) {
 
     SDL_ReleaseGPUTransferBuffer(gpu_device, transfer_buffer);
     SDL_DestroySurface(converted);
+    return texture;
+}
+
+SDL_GPUTexture *Renderer_LoadTexture(const char *const path) {
+    SDL_Surface *const surface = SDL_LoadSurface(path);
+    if (!surface) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load image %s: %s", path, SDL_GetError());
+        return nullptr;
+    }
+
+    SDL_GPUTexture *const texture = Renderer_CreateTextureFromSurface(surface);
     SDL_DestroySurface(surface);
     return texture;
 }
