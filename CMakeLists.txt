@@ -49,6 +49,7 @@ set(MISO_CORE_SOURCES
     engine/src/miso_camera.c
     engine/src/miso_iso.c
     engine/src/miso_world.c
+    engine/src/miso_tile_scene.c
     engine/src/miso_buildings.c
     engine/src/miso_render.c
     engine/src/miso_render_diagnostics.c
