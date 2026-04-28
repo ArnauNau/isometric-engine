@@ -1,7 +1,8 @@
 #include "internal/miso__engine_internal.h"
 #include "miso_camera.h"
+#include "miso_iso.h"
+#include "miso_tile_scene.h"
 #include "miso_world.h"
-#include "tilemap/tilemap.h"
 
 #include <SDL3/SDL.h>
 #include <stdarg.h>
@@ -11,8 +12,7 @@
 typedef struct PickFixture {
     MisoEngine engine;
     MisoWorld *world;
-    Tileset tileset;
-    Tilemap tilemap;
+    MisoTileScene *tile_scene;
     MisoCameraId camera_id;
     int logical_width;
     int logical_height;
@@ -69,18 +69,20 @@ static bool pick_fixture_init(PickFixture *const fixture,
                              fixture->engine.config.window_width,
                              fixture->engine.config.window_height);
 
-    fixture->tileset.tile_width = 32U;
-    fixture->tileset.tile_height = 32U;
-    fixture->tilemap.width = 10;
-    fixture->tilemap.height = 10;
-    fixture->tilemap.tileset = &fixture->tileset;
-
     const MisoIsoMapDesc desc = {
-        .width_tiles = fixture->tilemap.width,
-        .height_tiles = fixture->tilemap.height,
-        .tile_w_px = (int)fixture->tileset.tile_width,
-        .tile_h_px = (int)fixture->tileset.tile_height,
+        .width_tiles = 10,
+        .height_tiles = 10,
+        .tile_w_px = 32,
+        .tile_h_px = 32,
     };
+    const MisoTileSceneDesc scene_desc = {
+        .map = desc,
+    };
+    fixture->tile_scene = miso_tile_scene_create(&fixture->engine, &scene_desc);
+    if (!fixture->tile_scene) {
+        return false;
+    }
+
     fixture->world = miso_world_create(&fixture->engine, &desc);
     return fixture->world != NULL;
 }
@@ -91,19 +93,18 @@ static void pick_fixture_shutdown(PickFixture *const fixture) {
     }
 
     miso_world_destroy(fixture->world);
+    miso_tile_scene_destroy(fixture->tile_scene);
     SDL_free(fixture->engine.cameras);
     SDL_memset(fixture, 0, sizeof(*fixture));
 }
 
 static void tile_center_world(
     const PickFixture *const fixture, const int tile_x, const int tile_y, float *const world_x, float *const world_y) {
-    Tilemap_TileToWorld(&fixture->tilemap, tile_x, tile_y, world_x, world_y);
+    const MisoIsoMapDesc *const desc = miso_tile_scene_get_desc(fixture->tile_scene);
+    miso_iso_tile_to_world(desc, tile_x, tile_y, world_x, world_y);
 
-    float iso_w = 0.0f;
-    float iso_h = 0.0f;
-    Tileset_GetIsoDimensions(&fixture->tileset, &iso_w, &iso_h);
-    *world_x += iso_w * 0.5f;
-    *world_y += iso_h * 0.5f;
+    *world_x += (float)desc->tile_w_px * 0.5f;
+    *world_y += ((float)desc->tile_h_px * 0.5f) * 0.5f;
 }
 
 static SDL_Point screen_pixel_for_tile_center(const PickFixture *const fixture, const int tile_x, const int tile_y) {
@@ -121,7 +122,11 @@ testbed_pick_from_logical_mouse(const PickFixture *const fixture, const int logi
     const float pixel_y = (float)logical_y * fixture->pixel_ratio;
     const MisoVec2 world_position = miso_camera_screen_to_world(
         &fixture->engine, fixture->camera_id, (int)SDL_lroundf(pixel_x), (int)SDL_lroundf(pixel_y));
-    return Tilemap_ScreenToTile(&fixture->tilemap, world_position.x, world_position.y);
+    const MisoIsoMapDesc *const desc = miso_tile_scene_get_desc(fixture->tile_scene);
+    int tile_x = 0;
+    int tile_y = 0;
+    miso_iso_world_to_tile_floor(desc, world_position.x, world_position.y, &tile_x, &tile_y);
+    return (SDL_Point){.x = tile_x, .y = tile_y};
 }
 
 static bool world_pick_from_screen_pixels(const PickFixture *const fixture,

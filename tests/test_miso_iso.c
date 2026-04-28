@@ -1,7 +1,9 @@
 #include "miso_iso.h"
+#include "miso_tile_scene.h"
 
 #include <SDL3/SDL.h>
 #include <stdarg.h>
+#include <stdint.h>
 #include <stdio.h>
 
 typedef struct IsoTileSample {
@@ -155,10 +157,132 @@ static int run_world_to_tile_floor_boundary_case(void) {
     return 0;
 }
 
+static int run_tile_scene_placement_case(void) {
+    const MisoTileSceneDesc scene_desc = {
+        .map = g_desc,
+    };
+    MisoTileScene *const scene = miso_tile_scene_create((MisoEngine *)(uintptr_t)1, &scene_desc);
+    if (!scene) {
+        return failf("failed to create tile scene");
+    }
+
+    const MisoTilemapDesc tilemap_desc = {
+        .texture = 1,
+        .atlas_columns = 4,
+        .atlas_rows = 4,
+    };
+    MisoTilemap *const tilemap = miso_tilemap_create(scene, &tilemap_desc);
+    if (!tilemap) {
+        miso_tile_scene_destroy(scene);
+        return failf("failed to create tilemap");
+    }
+
+    miso_tilemap_fill(tilemap, 0, MISO_TILE_FLAG_BUILDABLE | MISO_TILE_FLAG_WALKABLE);
+    miso_tilemap_set_flags(tilemap, 4, 2, MISO_TILE_FLAG_PATH | MISO_TILE_FLAG_WALKABLE);
+
+    const MisoTileFootprint footprint = {
+        .width = 2,
+        .height = 2,
+        .anchor_x = 0,
+        .anchor_y = 0,
+    };
+    const MisoTilePlacementQuery query = {
+        .tile_x = 2,
+        .tile_y = 2,
+        .footprint = footprint,
+        .required_tile_flags = MISO_TILE_FLAG_BUILDABLE,
+        .forbidden_tile_flags = MISO_TILE_FLAG_WATER,
+        .occupied_mask = MISO_TILE_OCCUPANCY_OBJECT,
+        .required_adjacent_tile_flags = MISO_TILE_FLAG_PATH,
+    };
+
+    if (miso_tile_scene_check_placement(scene, tilemap, &query) != MISO_TILE_PLACE_OK) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("expected initial tile placement to be valid");
+    }
+
+    MisoTileObjectId object_id = 0;
+    const MisoTileObjectDesc object = {
+        .type_id = 7,
+        .tile_x = 2,
+        .tile_y = 2,
+        .footprint = footprint,
+        .visual_id = 3,
+        .occupancy_mask = MISO_TILE_OCCUPANCY_OBJECT,
+        .pickable = true,
+        .game_ref = 99,
+    };
+    if (miso_tile_scene_place_object(scene, tilemap, &object, &object_id) != MISO_OK || object_id == 0) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("failed to place tile object");
+    }
+
+    if ((miso_tile_scene_check_placement(scene, tilemap, &query) & MISO_TILE_PLACE_OCCUPIED) == 0) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("expected occupied placement to report occupancy");
+    }
+
+    MisoTileObjectId picked_id = 0;
+    if (!miso_tile_scene_pick_object_at_tile(scene, 3, 3, &picked_id) || picked_id != object_id) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("failed to pick placed tile object");
+    }
+
+    if (miso_tile_scene_remove_object(scene, object_id) != MISO_OK ||
+        miso_tile_scene_check_placement(scene, tilemap, &query) != MISO_TILE_PLACE_OK) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("failed to remove object and clear occupancy");
+    }
+
+    miso_tilemap_destroy(tilemap);
+    miso_tile_scene_destroy(scene);
+    return 0;
+}
+
+static int run_tile_scene_fractional_coords_case(void) {
+    const MisoTileSceneDesc scene_desc = {
+        .map = g_desc,
+    };
+    MisoTileScene *const scene = miso_tile_scene_create((MisoEngine *)(uintptr_t)1, &scene_desc);
+    if (!scene) {
+        return failf("failed to create tile scene");
+    }
+
+    float world_x = 0.0f;
+    float world_y = 0.0f;
+    if (!miso_tile_scene_tile_to_world(scene, 2.5f, 3.25f, &world_x, &world_y)) {
+        miso_tile_scene_destroy(scene);
+        return failf("failed to map fractional tile to world");
+    }
+
+    float tile_x = 0.0f;
+    float tile_y = 0.0f;
+    if (!miso_tile_scene_world_to_tile(scene, world_x, world_y, &tile_x, &tile_y)) {
+        miso_tile_scene_destroy(scene);
+        return failf("failed to map world to fractional tile");
+    }
+
+    if (!nearly_equal(tile_x, 2.5f) || !nearly_equal(tile_y, 3.25f)) {
+        miso_tile_scene_destroy(scene);
+        return failf("fractional tile roundtrip produced (%.3f, %.3f)", tile_x, tile_y);
+    }
+
+    miso_tile_scene_destroy(scene);
+    return 0;
+}
+
 int main(const int argc, const char *const *const argv) {
     if (argc != 3 || SDL_strcmp(argv[1], "--case") != 0) {
-        fprintf(
-            stderr, "usage: %s --case <tile-to-world|world-to-tile-center|world-to-tile-floor-boundary>\n", argv[0]);
+        fprintf(stderr,
+                "usage: %s --case "
+                "<tile-to-world|world-to-tile-center|world-to-tile-floor-boundary|tile-scene-placement|"
+                "tile-scene-fractional-coords>\n",
+                argv[0]);
         return 2;
     }
 
@@ -170,6 +294,12 @@ int main(const int argc, const char *const *const argv) {
     }
     if (SDL_strcmp(argv[2], "world-to-tile-floor-boundary") == 0) {
         return run_world_to_tile_floor_boundary_case();
+    }
+    if (SDL_strcmp(argv[2], "tile-scene-placement") == 0) {
+        return run_tile_scene_placement_case();
+    }
+    if (SDL_strcmp(argv[2], "tile-scene-fractional-coords") == 0) {
+        return run_tile_scene_fractional_coords_case();
     }
 
     fprintf(stderr, "unknown test case: %s\n", argv[2]);

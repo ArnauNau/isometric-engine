@@ -233,6 +233,12 @@ if(MISO_BUILD_TESTS)
     add_test(NAME miso_world_pixel_tile_pick_parity
         COMMAND miso_unit_tests --case world-pixel-parity
     )
+    add_test(NAME miso_tile_scene_placement
+        COMMAND miso_engine_tests --case tile-scene-placement
+    )
+    add_test(NAME miso_tile_scene_fractional_coords
+        COMMAND miso_engine_tests --case tile-scene-fractional-coords
+    )
     add_test(NAME miso_cafe_hidpi_tile_pick
         COMMAND miso_unit_tests --case cafe-hidpi
     )
