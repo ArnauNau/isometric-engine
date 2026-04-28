@@ -87,6 +87,21 @@ void miso_render_destroy_texture(const MisoEngine *const engine, const MisoTextu
     g_texture_table[texture] = nullptr;
 }
 
+void miso_render_diag_submit_ui_texture_handle_debug(const MisoEngine *const engine,
+                                                     const MisoTextureHandle texture,
+                                                     const float x,
+                                                     const float y,
+                                                     const float width,
+                                                     const float height) {
+    (void)engine;
+
+    if (texture == 0 || texture >= MISO_TEXTURE_TABLE_MAX || !g_texture_table[texture]) {
+        return;
+    }
+
+    miso__renderer_draw_texture_debug(g_texture_table[texture], x, y, width, height);
+}
+
 MisoResult miso_render_load_font(const MisoEngine *const engine,
                                  const char *const path,
                                  const float point_size,

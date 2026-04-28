@@ -3,11 +3,12 @@
 #include "game_clock.h"
 #include "miso_camera.h"
 #include "miso_debug_ui.h"
+#include "miso_iso.h"
 #include "miso_profiler.h"
 #include "miso_render.h"
 #include "miso_render_diagnostics.h"
 #include "miso_text.h"
-#include "tilemap/tilemap.h"
+#include "miso_tile_scene.h"
 #include "vendored/nuklear/nuklear.h"
 
 #include <SDL3/SDL.h>
@@ -76,16 +77,15 @@ struct TestbedGame {
     float camera_y;
     float camera_zoom;
 
-    Tileset *tileset;
-    Tilemap *tilemap;
+    MisoTextureHandle tile_texture;
+    MisoTileScene *tile_scene;
+    MisoTilemap *tilemap;
 
     int building_count;
     RenderableComponent renderables[MAX_BUILDINGS];
     TransformComponent transforms[MAX_BUILDINGS];
     BuildingComponent buildings[MAX_BUILDINGS];
     WireframeMesh wireframe_meshes[MAX_BUILDINGS];
-    MisoSpriteInstance *building_instances;
-    int building_instances_capacity;
     float *wireframe_line_scratch;
     size_t wireframe_line_scratch_capacity_vertices;
 
@@ -231,17 +231,56 @@ static void testbed_sync_window_metrics(TestbedGame *const game) {
     }
 }
 
+static const MisoIsoMapDesc *testbed_map_desc(const TestbedGame *const game) {
+    return game && game->tile_scene ? miso_tile_scene_get_desc(game->tile_scene) : nullptr;
+}
+
+static bool testbed_tile_in_bounds(const TestbedGame *const game, const int tx, const int ty) {
+    const MisoIsoMapDesc *const desc = testbed_map_desc(game);
+    return desc && tx >= 0 && ty >= 0 && tx < desc->width_tiles && ty < desc->height_tiles;
+}
+
+static bool testbed_tile_to_world_top_left(
+    const TestbedGame *const game, const int tx, const int ty, float *const out_world_x, float *const out_world_y) {
+    const MisoIsoMapDesc *const desc = testbed_map_desc(game);
+    if (!desc || !out_world_x || !out_world_y) {
+        return false;
+    }
+
+    miso_iso_tile_to_world(desc, tx, ty, out_world_x, out_world_y);
+    return true;
+}
+
+static float testbed_tile_depth(const TestbedGame *const game, const float tx, const float ty) {
+    return game && game->tile_scene ? miso_tile_scene_depth_at_tile(game->tile_scene, tx, ty) : 0.0f;
+}
+
+static bool testbed_is_tile_free(const TestbedGame *const game, const int tx, const int ty) {
+    if (!game || !game->tile_scene || !game->tilemap || !testbed_tile_in_bounds(game, tx, ty)) {
+        return false;
+    }
+
+    const MisoTilePlacementQuery query = {
+        .tile_x = tx,
+        .tile_y = ty,
+        .footprint = {.width = 1, .height = 1, .anchor_x = 0, .anchor_y = 0},
+        .occupied_mask = MISO_TILE_OCCUPANCY_OBJECT,
+    };
+    return (miso_tile_scene_check_placement(game->tile_scene, game->tilemap, &query) & MISO_TILE_PLACE_OCCUPIED) == 0;
+}
+
 static void testbed_apply_benchmark_camera_preset(TestbedGame *const game) {
-    if (!game || !game->tilemap || game->camera_id == 0) {
+    const MisoIsoMapDesc *const desc = testbed_map_desc(game);
+    if (!game || !desc || game->camera_id == 0) {
         return;
     }
 
-    const int center_x = game->tilemap->width / 2;
-    const int center_y = game->tilemap->height / 2;
+    const int center_x = desc->width_tiles / 2;
+    const int center_y = desc->height_tiles / 2;
 
     float world_x = 0.0f;
     float world_y = 0.0f;
-    Tilemap_TileToWorld(game->tilemap, center_x, center_y, &world_x, &world_y);
+    testbed_tile_to_world_top_left(game, center_x, center_y, &world_x, &world_y);
 
     float zoom = 1.0f;
     switch (game->benchmark_camera_state) {
@@ -322,32 +361,6 @@ static bool testbed_should_render_wire(const TestbedGame *const game) {
     }
 }
 
-static bool testbed_ensure_building_instance_capacity(TestbedGame *const game, const int needed_instances) {
-    if (!game || needed_instances <= 0) {
-        return false;
-    }
-    if (needed_instances <= game->building_instances_capacity) {
-        return true;
-    }
-
-    int new_capacity = game->building_instances_capacity > 0 ? game->building_instances_capacity : 512;
-    while (new_capacity < needed_instances) {
-        new_capacity *= 2;
-    }
-
-    MisoSpriteInstance *new_instances =
-        SDL_realloc(game->building_instances, sizeof(MisoSpriteInstance) * (size_t)new_capacity);
-    if (!new_instances) {
-        SDL_LogWarn(
-            SDL_LOG_CATEGORY_RENDER, "testbed: failed to grow building instance scratch to %d", needed_instances);
-        return false;
-    }
-
-    game->building_instances = new_instances;
-    game->building_instances_capacity = new_capacity;
-    return true;
-}
-
 static bool testbed_ensure_wireframe_line_capacity(TestbedGame *game, const size_t needed_vertices) {
     if (!game || needed_vertices == 0U) {
         return false;
@@ -402,18 +415,17 @@ static void testbed_render_tile_highlight(const TestbedGame *const game,
                                           const int tile_x,
                                           const int tile_y,
                                           const SDL_FColor color) {
-    if (!game->tilemap || tile_x < 0 || tile_y < 0 || tile_x >= game->tilemap->width ||
-        tile_y >= game->tilemap->height) {
+    if (!testbed_tile_in_bounds(game, tile_x, tile_y)) {
         return;
     }
 
     float world_x = 0.0f;
     float world_y = 0.0f;
-    Tilemap_TileToWorld(game->tilemap, tile_x, tile_y, &world_x, &world_y);
+    testbed_tile_to_world_top_left(game, tile_x, tile_y, &world_x, &world_y);
 
-    float iso_w = 0.0f;
-    float iso_h = 0.0f;
-    Tileset_GetIsoDimensions(game->tilemap->tileset, &iso_w, &iso_h);
+    const MisoIsoMapDesc *const desc = testbed_map_desc(game);
+    const float iso_w = (float)desc->tile_w_px;
+    const float iso_h = (float)desc->tile_h_px * 0.5f;
 
     const float top_x = world_x + iso_w / 2.0f;
     const float top_y = world_y;
@@ -424,7 +436,7 @@ static void testbed_render_tile_highlight(const TestbedGame *const game,
     const float left_x = world_x;
     const float left_y = world_y + iso_h / 2.0f;
 
-    const float depth = Tilemap_GetTileDepth(game->tilemap, tile_x, tile_y) - 0.002f;
+    const float depth = testbed_tile_depth(game, (float)tile_x, (float)tile_y) - 0.002f;
     constexpr float beacon_height = 200.0f;
     float line_vertices[30] = {0.0f};
     int vertex_count = 0;
@@ -545,73 +557,19 @@ fail:
 static void testbed_render_buildings(TestbedGame *const game) {
     miso_profiler_begin(game ? game->engine : nullptr, game ? game->profiler_render_buildings : 0);
 
-    if (!game || !game->tilemap) {
+    if (!game || !game->tile_scene) {
         miso_profiler_end(game ? game->engine : nullptr, game ? game->profiler_render_buildings : 0);
         return;
     }
 
-    const int needed_instances = game->building_count + 1;
-    if (!testbed_ensure_building_instance_capacity(game, needed_instances)) {
-        miso_profiler_end(game->engine, game->profiler_render_buildings);
-        return;
-    }
-
-    const int tile_w = (int)game->tilemap->tileset->tile_width;
-    const int tile_h = (int)game->tilemap->tileset->tile_height;
-    const float iso_w = (float)tile_w;
-    const float iso_h = (float)tile_h / 2.0f;
-    const float start_x = (float)(game->tilemap->height - 1) * iso_w / 2.0f;
-    constexpr float start_y = 0.0f;
-
-    MisoSpriteInstance *instances = game->building_instances;
-    int instance_count = 0;
-
-    const float tex_w = (float)(game->tilemap->tileset->columns * game->tilemap->tileset->tile_width);
-    const float tex_h = (float)(game->tilemap->tileset->rows * game->tilemap->tileset->tile_height);
-
-    for (int entity = 0; entity < game->building_count; entity++) {
-        const int bw = game->renderables[entity].sprite_w;
-        const int bh = game->renderables[entity].sprite_h;
-        const int mx = game->transforms[entity].x;
-        const int my = game->transforms[entity].y;
-
-        float iso_x = start_x + (float)(mx - my) * (iso_w / 2.0f);
-        float iso_y = start_y + (float)(mx + my) * (iso_h / 2.0f);
-
-        iso_y -= (float)tile_h;
-        iso_y -= (float)bh * iso_h;
-        iso_x -= (float)(game->buildings[entity].width - 1) * 0.5f * iso_w;
-
-        const int col = game->renderables[entity].tile_index % (int)game->tilemap->tileset->columns;
-        const int row = game->renderables[entity].tile_index / (int)game->tilemap->tileset->columns;
-        const float u = (float)(col * tile_w) / tex_w;
-        const float v = (float)(row * tile_h) / tex_h;
-        const float uw = (float)(bw * tile_w) / tex_w;
-        const float vh = (float)(bh * tile_h) / tex_h;
-
-        const float depth = 1.0f - (float)(mx + my) / (float)(game->tilemap->width + game->tilemap->height) - 0.001f;
-
-        instances[instance_count++] = (MisoSpriteInstance){.x = iso_x,
-                                                           .y = iso_y,
-                                                           .z = depth,
-                                                           .flags = 0.0f,
-                                                           .w = (float)(bw * tile_w),
-                                                           .h = (float)(bh * tile_h),
-                                                           .tile_x = 0.0f,
-                                                           .tile_y = 0.0f,
-                                                           .u = u,
-                                                           .v = v,
-                                                           .uw = uw,
-                                                           .vh = vh};
-    }
-
-    miso_render_diag_submit_native_sprites(game->engine, game->tilemap->tileset->texture, instances, instance_count);
+    miso_tile_scene_render_objects(game->engine, game->tile_scene, game->camera_id);
 
     miso_profiler_end(game->engine, game->profiler_render_buildings);
 }
 
 static void testbed_spawn_boat(TestbedGame *const game, const int x, const int y) {
-    if (!game->tilemap || game->building_count >= MAX_BUILDINGS) {
+    const MisoIsoMapDesc *const desc = testbed_map_desc(game);
+    if (!game || !game->tile_scene || !game->tilemap || !desc || game->building_count >= MAX_BUILDINGS) {
         return;
     }
 
@@ -627,25 +585,36 @@ static void testbed_spawn_boat(TestbedGame *const game, const int x, const int y
     game->buildings[game->building_count].width = b_w;
     game->buildings[game->building_count].length = b_l;
 
-    for (int dy = 0; dy > -b_l; dy--) {
-        for (int dx = 0; dx > -b_w; dx--) {
-            Tilemap_SetOccupied(game->tilemap, game->hover_tile.x + dx, game->hover_tile.y + dy, true);
-            Tilemap_SetTile(game->tilemap, game->hover_tile.x + dx, game->hover_tile.y + dy, TILE_PLACEHOLDER_TERRAIN);
-            Tilemap_SetFlags(game->tilemap, game->hover_tile.x + dx, game->hover_tile.y + dy, TILE_FLAG_NONE);
-        }
+    const MisoTileFootprint footprint = {.width = b_w, .height = b_l, .anchor_x = 0, .anchor_y = b_l - 1};
+    const MisoTileObjectDesc object = {
+        .type_id = TILE_PLACEHOLDER_BOAT,
+        .tile_x = x,
+        .tile_y = y,
+        .footprint = footprint,
+        .visual_id = TILE_PLACEHOLDER_BOAT,
+        .occupancy_mask = MISO_TILE_OCCUPANCY_OBJECT,
+        .pickable = true,
+    };
+    if (miso_tile_scene_place_object(game->tile_scene, game->tilemap, &object, nullptr) != MISO_OK) {
+        return;
+    }
+
+    for (int dy = 0; dy < b_l; dy++) {
+        miso_tilemap_set_tile(game->tilemap, x, y - dy, TILE_PLACEHOLDER_TERRAIN);
+        miso_tilemap_set_flags(game->tilemap, x, y - dy, MISO_TILE_FLAG_NONE);
     }
 
     constexpr float b_h_ = 3.0f;
     constexpr float b_w_ = 1.0f;
-    const float tile_w = (float)game->tilemap->tileset->tile_width;
-    const float tile_h = (float)game->tilemap->tileset->tile_height;
+    const float tile_w = (float)desc->tile_w_px;
+    const float tile_h = (float)desc->tile_h_px;
     const float iso_w = tile_w;
     const float iso_h = tile_h * 0.5f;
-    const float start_x = (float)(game->tilemap->height - 1) * iso_w * 0.5f;
+    const float start_x = (float)(desc->height_tiles - 1) * iso_w * 0.5f;
     constexpr float start_y = 0.0f;
     const float iso_x = start_x + (float)(x - y) * iso_w * 0.5f - (b_w_ - 1.0f) * iso_w * 0.5f;
     const float iso_y = start_y + (float)(x + y) * iso_h * 0.5f - tile_h - b_h_ * iso_h;
-    const float wire_depth = 1.0f - (float)(x + y) / (float)(game->tilemap->width + game->tilemap->height) - 0.0015f;
+    const float wire_depth = testbed_tile_depth(game, (float)x, (float)y) - 0.0015f;
     game->wireframe_meshes[game->building_count] =
         testbed_build_wireframe_mesh(iso_x, iso_y, iso_w, iso_h, 1, 3, 2, 3, wire_depth);
 
@@ -653,24 +622,43 @@ static void testbed_spawn_boat(TestbedGame *const game, const int x, const int y
 }
 
 static void testbed_spawn_boats(TestbedGame *const game, const int amount) {
-    if (!game->tilemap) {
+    const MisoIsoMapDesc *const desc = testbed_map_desc(game);
+    if (!game || !game->tilemap || !desc) {
         return;
     }
 
     int count = 0;
-    for (int y = game->tilemap->height - 1; y >= 2; y -= 3) {
-        for (int x = 0; x < game->tilemap->width; x++) {
+    for (int y = desc->height_tiles - 1; y >= 2; y -= 3) {
+        for (int x = 0; x < desc->width_tiles; x++) {
             if (count >= amount || game->building_count >= MAX_BUILDINGS) {
                 return;
             }
 
-            if (Tilemap_IsTileFree(game->tilemap, x, y) && Tilemap_IsTileFree(game->tilemap, x, y - 1) &&
-                Tilemap_IsTileFree(game->tilemap, x, y - 2)) {
+            const MisoTileFootprint footprint = {.width = 1, .height = 3, .anchor_x = 0, .anchor_y = 2};
+            const MisoTilePlacementQuery query = {
+                .tile_x = x,
+                .tile_y = y,
+                .footprint = footprint,
+                .occupied_mask = MISO_TILE_OCCUPANCY_OBJECT,
+            };
+
+            if (miso_tile_scene_check_placement(game->tile_scene, game->tilemap, &query) == MISO_TILE_PLACE_OK) {
+                const MisoTileObjectDesc object = {
+                    .type_id = TILE_PLACEHOLDER_BOAT,
+                    .tile_x = x,
+                    .tile_y = y,
+                    .footprint = footprint,
+                    .visual_id = TILE_PLACEHOLDER_BOAT,
+                    .occupancy_mask = MISO_TILE_OCCUPANCY_OBJECT,
+                    .pickable = true,
+                };
+                if (miso_tile_scene_place_object(game->tile_scene, game->tilemap, &object, nullptr) != MISO_OK) {
+                    continue;
+                }
 
                 for (int dy = 0; dy < 3; dy++) {
-                    Tilemap_SetTile(game->tilemap, x, y - dy, TILE_PLACEHOLDER_TERRAIN);
-                    Tilemap_SetOccupied(game->tilemap, x, y - dy, true);
-                    Tilemap_SetFlags(game->tilemap, x, y - dy, TILE_FLAG_NONE);
+                    miso_tilemap_set_tile(game->tilemap, x, y - dy, TILE_PLACEHOLDER_TERRAIN);
+                    miso_tilemap_set_flags(game->tilemap, x, y - dy, MISO_TILE_FLAG_NONE);
                 }
 
                 game->renderables[game->building_count].tile_index = TILE_PLACEHOLDER_BOAT;
@@ -684,16 +672,15 @@ static void testbed_spawn_boats(TestbedGame *const game, const int amount) {
 
                 constexpr float b_h_ = 3.0f;
                 constexpr float b_w_ = 1.0f;
-                const float tile_w = (float)game->tilemap->tileset->tile_width;
-                const float tile_h = (float)game->tilemap->tileset->tile_height;
+                const float tile_w = (float)desc->tile_w_px;
+                const float tile_h = (float)desc->tile_h_px;
                 const float iso_w = tile_w;
                 const float iso_h = tile_h * 0.5f;
-                const float start_x = (float)(game->tilemap->height - 1) * iso_w * 0.5f;
+                const float start_x = (float)(desc->height_tiles - 1) * iso_w * 0.5f;
                 constexpr float start_y = 0.0f;
                 const float iso_x = start_x + (float)(x - y) * iso_w * 0.5f - (b_w_ - 1.0f) * iso_w * 0.5f;
                 const float iso_y = start_y + (float)(x + y) * iso_h * 0.5f - tile_h - b_h_ * iso_h;
-                const float wire_depth =
-                    1.0f - (float)(x + y) / (float)(game->tilemap->width + game->tilemap->height) - 0.0015f;
+                const float wire_depth = testbed_tile_depth(game, (float)x, (float)y) - 0.0015f;
                 game->wireframe_meshes[game->building_count] =
                     testbed_build_wireframe_mesh(iso_x, iso_y, iso_w, iso_h, 1, 3, 2, 3, wire_depth);
 
@@ -705,13 +692,18 @@ static void testbed_spawn_boats(TestbedGame *const game, const int amount) {
 }
 
 static void testbed_refresh_hover_tile(TestbedGame *const game) {
-    if (!game->tilemap || game->camera_id == 0) {
+    if (!game || !game->tile_scene || game->camera_id == 0) {
         return;
     }
 
     const MisoVec2 world_position =
         miso_camera_screen_to_world(game->engine, game->camera_id, (int)game->mouse_x, (int)game->mouse_y);
-    game->hover_tile = Tilemap_ScreenToTile(game->tilemap, world_position.x, world_position.y);
+    float tile_x = 0.0f;
+    float tile_y = 0.0f;
+    if (!miso_tile_scene_world_to_tile(game->tile_scene, world_position.x, world_position.y, &tile_x, &tile_y)) {
+        return;
+    }
+    game->hover_tile = (SDL_Point){(int)SDL_floorf(tile_x), (int)SDL_floorf(tile_y)};
 }
 
 static void testbed_game_on_event(void *const ctx, const MisoEvent *const event) {
@@ -812,10 +804,8 @@ static void testbed_game_on_event(void *const ctx, const MisoEvent *const event)
             break;
         }
         if (event->data.mouse_button.button == MISO_MOUSE_BUTTON_LEFT && event->data.mouse_button.down) {
-            if (game->hover_tile.x >= 0 && game->hover_tile.y >= 0 && game->tilemap &&
-                game->hover_tile.x < game->tilemap->width && game->hover_tile.y < game->tilemap->height &&
-                game->building_count < MAX_BUILDINGS &&
-                Tilemap_IsTileFree(game->tilemap, game->hover_tile.x, game->hover_tile.y)) {
+            if (game->building_count < MAX_BUILDINGS &&
+                testbed_is_tile_free(game, game->hover_tile.x, game->hover_tile.y)) {
                 testbed_spawn_boat(game, game->hover_tile.x, game->hover_tile.y);
             }
         }
@@ -913,19 +903,15 @@ static void testbed_game_on_render_world(void *const ctx, const MisoEngine *cons
 
     if (testbed_should_render_world(game)) {
         miso_profiler_begin(game->engine, game->profiler_render_map);
-        Tilemap_Render(game->tilemap);
+        miso_tilemap_render(engine, game->tilemap, game->tile_scene, game->camera_id);
         miso_profiler_end(game->engine, game->profiler_render_map);
 
         testbed_render_buildings(game);
         testbed_render_tile_highlight(
             game, game->hover_tile.x, game->hover_tile.y, (SDL_FColor){0.0f, 1.0f, 1.0f, 1.0f});
 
-        miso_render_diag_submit_ui_texture_debug(game->engine,
-                                                 game->tilemap->tileset->texture,
-                                                 50.0f,
-                                                 (float)game->screen_height - 384.0f - 50.0f,
-                                                 192.0f,
-                                                 384.0f);
+        miso_render_diag_submit_ui_texture_handle_debug(
+            game->engine, game->tile_texture, 50.0f, (float)game->screen_height - 384.0f - 50.0f, 192.0f, 384.0f);
     }
 
     if (testbed_should_render_wire(game)) {
@@ -1255,18 +1241,24 @@ static const MisoGameHooks g_testbed_game_hooks = {
 };
 
 static void testbed_populate_demo_map(const TestbedGame *const game) {
-    for (int y = 0; y < game->tilemap->height; y++) {
-        for (int x = 0; x < game->tilemap->width; x++) {
-            const int i = y * game->tilemap->width + x;
-            int tile_index = (i % 2) ? 0 : 36;
+    const MisoIsoMapDesc *const desc = testbed_map_desc(game);
+    if (!game || !game->tilemap || !desc) {
+        return;
+    }
 
-            if (i > (game->tilemap->width * game->tilemap->height) -
-                        (game->tilemap->width / 2) * (game->tilemap->height / 2)) {
+    for (int y = 0; y < desc->height_tiles; y++) {
+        for (int x = 0; x < desc->width_tiles; x++) {
+            const int i = y * desc->width_tiles + x;
+            int tile_index = (i % 2) ? 0 : 36;
+            uint32_t flags = MISO_TILE_FLAG_NONE;
+
+            if (i > (desc->width_tiles * desc->height_tiles) - (desc->width_tiles / 2) * (desc->height_tiles / 2)) {
                 tile_index = TILE_PLACEHOLDER_SEA;
-                Tilemap_SetFlags(game->tilemap, x, y, TILE_FLAG_WATER);
+                flags = MISO_TILE_FLAG_WATER;
             }
 
-            Tilemap_SetTile(game->tilemap, x, y, tile_index);
+            miso_tilemap_set_tile(game->tilemap, x, y, (uint32_t)tile_index);
+            miso_tilemap_set_flags(game->tilemap, x, y, flags);
         }
     }
 }
@@ -1285,15 +1277,12 @@ static void testbed_clear_buildings(TestbedGame *const game) {
 }
 
 static void testbed_reset_demo_scene(TestbedGame *const game, const int spawn_count) {
-    if (!game || !game->tilemap) {
+    if (!game || !game->tile_scene || !game->tilemap) {
         return;
     }
 
     testbed_clear_buildings(game);
-
-    const size_t tile_count = (size_t)game->tilemap->width * (size_t)game->tilemap->height;
-    SDL_memset(game->tilemap->occupied, false, tile_count * sizeof(bool));
-    SDL_memset(game->tilemap->flags, 0, tile_count * sizeof(uint8_t));
+    miso_tile_scene_clear_objects(game->tile_scene);
     testbed_populate_demo_map(game);
 
     game->hover_tile = (SDL_Point){-1, -1};
@@ -1328,11 +1317,6 @@ MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
     game->benchmark_profiler_enabled = true;
     game->benchmark_diagnostic_mode = TESTBED_BENCH_DIAGNOSTIC_DEFAULT;
     game->benchmark_camera_state = TESTBED_BENCH_CAMERA_ZOOM_IN_CENTER;
-
-    if (!testbed_ensure_building_instance_capacity(game, MAX_BUILDINGS + 1)) {
-        SDL_free(game);
-        return MISO_ERR_OUT_OF_MEMORY;
-    }
 
     game->camera_id = miso_camera_create(engine);
     if (game->camera_id == 0) {
@@ -1389,14 +1373,48 @@ MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
     miso_profiler_overlay_init(engine, game->hud_font);
 
     char resource_path[512] = {0};
-    game->tileset = Tileset_Load(testbed_get_resource_path(resource_path, "isometric-sheet.png"), TILE_SIZE, TILE_SIZE);
-    if (!game->tileset) {
+    const char *const tileset_path = testbed_get_resource_path(resource_path, "isometric-sheet.png");
+    if (miso_render_load_texture(engine, tileset_path, &game->tile_texture) != MISO_OK) {
         testbed_game_destroy(game);
         return MISO_ERR_IO;
     }
 
-    game->tilemap = Tilemap_Create(MAP_SIZE_X, MAP_SIZE_Y, game->tileset);
+    const MisoTileSceneDesc tile_scene_desc = {
+        .map =
+            {
+                .width_tiles = MAP_SIZE_X,
+                .height_tiles = MAP_SIZE_Y,
+                .tile_w_px = TILE_SIZE,
+                .tile_h_px = TILE_SIZE,
+            },
+    };
+    game->tile_scene = miso_tile_scene_create(engine, &tile_scene_desc);
+    if (!game->tile_scene) {
+        testbed_game_destroy(game);
+        return MISO_ERR_OUT_OF_MEMORY;
+    }
+
+    const MisoTilemapDesc tilemap_desc = {
+        .texture = game->tile_texture,
+        .atlas_columns = 6,
+        .atlas_rows = 12,
+    };
+    game->tilemap = miso_tilemap_create(game->tile_scene, &tilemap_desc);
     if (!game->tilemap) {
+        testbed_game_destroy(game);
+        return MISO_ERR_OUT_OF_MEMORY;
+    }
+
+    const MisoTileObjectVisualDesc boat_visual = {
+        .visual_id = TILE_PLACEHOLDER_BOAT,
+        .texture = game->tile_texture,
+        .atlas_columns = 6,
+        .atlas_rows = 12,
+        .atlas_tile_id = TILE_PLACEHOLDER_BOAT,
+        .sprite_w_tiles = 2,
+        .sprite_h_tiles = 3,
+    };
+    if (miso_tile_scene_set_object_visual(game->tile_scene, &boat_visual) != MISO_OK) {
         testbed_game_destroy(game);
         return MISO_ERR_OUT_OF_MEMORY;
     }
@@ -1423,15 +1441,17 @@ void testbed_game_destroy(TestbedGame *game) {
     game->wireframe_line_scratch = nullptr;
     game->wireframe_line_scratch_capacity_vertices = 0U;
 
-    SDL_free(game->building_instances);
-    game->building_instances = nullptr;
-    game->building_instances_capacity = 0;
-
     if (game->tilemap) {
-        Tilemap_Destroy(game->tilemap);
+        miso_tilemap_destroy(game->tilemap);
+        game->tilemap = nullptr;
     }
-    if (game->tileset) {
-        Tileset_Destroy(game->tileset);
+    if (game->tile_scene) {
+        miso_tile_scene_destroy(game->tile_scene);
+        game->tile_scene = nullptr;
+    }
+    if (game->tile_texture != 0) {
+        miso_render_destroy_texture(game->engine, game->tile_texture);
+        game->tile_texture = 0;
     }
 
     miso_profiler_overlay_shutdown(game->engine);

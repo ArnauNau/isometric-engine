@@ -197,6 +197,22 @@ void miso_render_diag_submit_ui_texture_debug(
     const MisoEngine *engine, void *native_texture, float x, float y, float width, float height);
 
 /**
+ * Draws an engine texture handle into UI space for debugging.
+ *
+ * Invalid texture handles are ignored. This is intended for diagnostics and
+ * should not be used as normal gameplay UI image rendering.
+ *
+ * \param engine Engine whose renderer is active.
+ * \param texture Engine texture handle.
+ * \param x UI x coordinate in pixels.
+ * \param y UI y coordinate in pixels.
+ * \param width Draw width in pixels.
+ * \param height Draw height in pixels.
+ */
+void miso_render_diag_submit_ui_texture_handle_debug(
+    const MisoEngine *engine, MisoTextureHandle texture, float x, float y, float width, float height);
+
+/**
  * Submits sprites using a native backend texture pointer.
  *
  * This bypasses MisoTextureHandle lookup and is intended for diagnostics or
