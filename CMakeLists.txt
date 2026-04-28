@@ -42,7 +42,6 @@ set(MISO_CORE_SOURCES
     ecs/ecs.c
     renderer/renderer.c
     renderer/ui.c
-    tilemap/tilemap.c
     engine/src/internal/miso__renderer_backend.c
     engine/src/miso_engine.c
     engine/src/miso_events.c
