@@ -55,7 +55,18 @@ bool miso__renderer_get_vsync(void);
 void miso__renderer_begin_frame(void);
 void miso__renderer_end_frame(void);
 
-SDL_GPUTexture *miso__renderer_load_texture(const char *path);
+/**
+ * Loads an image through the renderer and returns the native GPU texture.
+ *
+ * This is an engine-internal bridge. Public code should use MisoTextureHandle
+ * and miso_render_get_texture_info().
+ *
+ * \param path Image file path.
+ * \param out_width Optional output for decoded image width in pixels.
+ * \param out_height Optional output for decoded image height in pixels.
+ * \return Native GPU texture, or NULL on failure.
+ */
+SDL_GPUTexture *miso__renderer_load_texture(const char *path, uint32_t *out_width, uint32_t *out_height);
 void miso__renderer_destroy_texture(SDL_GPUTexture *texture);
 void miso__renderer_set_view_projection(const float *view_projection);
 void miso__renderer_set_water_params(float time, float speed, float amplitude, float phase);

@@ -56,8 +56,16 @@ void miso__renderer_end_frame(void) {
     Renderer_EndFrame();
 }
 
-SDL_GPUTexture *miso__renderer_load_texture(const char *path) {
-    return Renderer_LoadTexture(path);
+SDL_GPUTexture *
+miso__renderer_load_texture(const char *const path, uint32_t *const out_width, uint32_t *const out_height) {
+    const RendererTextureLoadResult result = Renderer_LoadTexture(path);
+    if (out_width) {
+        *out_width = result.width;
+    }
+    if (out_height) {
+        *out_height = result.height;
+    }
+    return result.texture;
 }
 
 void miso__renderer_destroy_texture(SDL_GPUTexture *texture) {
@@ -68,7 +76,7 @@ void miso__renderer_set_view_projection(const float *view_projection) {
     Renderer_SetViewProjection(view_projection);
 }
 
-void miso__renderer_set_water_params(float time, float speed, float amplitude, float phase) {
+void miso__renderer_set_water_params(const float time, const float speed, const float amplitude, const float phase) {
     Renderer_SetWaterParams(time, speed, amplitude, phase);
 }
 
@@ -76,7 +84,7 @@ void miso__renderer_draw_sprites(SDL_GPUTexture *texture, const void *instances,
     Renderer_DrawSprites(texture, (const SpriteInstance *)instances, count);
 }
 
-void miso__renderer_draw_native_sprites(void *texture, const void *instances, int count) {
+void miso__renderer_draw_native_sprites(void *const texture, const void *const instances, const int count) {
     Renderer_DrawSprites((SDL_GPUTexture *)texture, (const SpriteInstance *)instances, count);
 }
 
@@ -84,7 +92,7 @@ void miso__renderer_draw_line_batch(const float *vertices_xyz, const int vertex_
     Renderer_DrawLineBatch(vertices_xyz, vertex_count, color);
 }
 
-void miso__renderer_draw_geometry(const SDL_Vertex *vertices, int count) {
+void miso__renderer_draw_geometry(const SDL_Vertex *const vertices, const int count) {
     Renderer_DrawGeometry(vertices, count);
 }
 
@@ -98,7 +106,7 @@ bool miso__renderer_copy_frame_stats(MisoRendererFrameStatsSnapshot *out_stats) 
         return false;
     }
 
-    const RendererFrameStats *stats = Renderer_GetFrameStats();
+    const RendererFrameStats *const stats = Renderer_GetFrameStats();
     if (!stats) {
         SDL_memset(out_stats, 0, sizeof(*out_stats));
         return false;

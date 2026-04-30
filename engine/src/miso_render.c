@@ -15,7 +15,20 @@ typedef struct MisoFontEntry {
     TTF_Text *text;
 } MisoFontEntry;
 
-static SDL_GPUTexture *g_texture_table[MISO_TEXTURE_TABLE_MAX] = {0};
+typedef struct MisoTextureEntry {
+    /**
+     * Private storage behind MisoTextureHandle.
+     *
+     * The native texture is renderer-owned through this table entry. Dimensions
+     * are retained as lightweight resource metadata for systems such as tile
+     * atlases without exposing SDL_GPUTexture.
+     */
+    SDL_GPUTexture *texture;
+    uint32_t width;
+    uint32_t height;
+} MisoTextureEntry;
+
+static MisoTextureEntry g_texture_table[MISO_TEXTURE_TABLE_MAX] = {0};
 static MisoFontEntry g_font_table[MISO_FONT_TABLE_MAX] = {0};
 static SDL_Vertex *g_world_geometry_scratch = nullptr;
 static int g_world_geometry_scratch_capacity = 0;
@@ -59,14 +72,20 @@ miso_render_load_texture(const MisoEngine *const engine, const char *const path,
         return MISO_ERR_INVALID_ARG;
     }
 
-    SDL_GPUTexture *texture = miso__renderer_load_texture(path);
+    uint32_t width = 0;
+    uint32_t height = 0;
+    SDL_GPUTexture *texture = miso__renderer_load_texture(path, &width, &height);
     if (!texture) {
         return MISO_ERR_IO;
     }
 
     for (uint32_t i = 1; i < MISO_TEXTURE_TABLE_MAX; i++) {
-        if (!g_texture_table[i]) {
-            g_texture_table[i] = texture;
+        if (!g_texture_table[i].texture) {
+            g_texture_table[i] = (MisoTextureEntry){
+                .texture = texture,
+                .width = width,
+                .height = height,
+            };
             *out_texture = i;
             return MISO_OK;
         }
@@ -76,15 +95,31 @@ miso_render_load_texture(const MisoEngine *const engine, const char *const path,
     return MISO_ERR_OUT_OF_MEMORY;
 }
 
+MisoResult miso_render_get_texture_info(const MisoEngine *const engine,
+                                        const MisoTextureHandle texture,
+                                        MisoTextureInfo *const out_info) {
+    (void)engine;
+
+    if (texture == 0 || texture >= MISO_TEXTURE_TABLE_MAX || !out_info || !g_texture_table[texture].texture) {
+        return MISO_ERR_INVALID_ARG;
+    }
+
+    *out_info = (MisoTextureInfo){
+        .width = g_texture_table[texture].width,
+        .height = g_texture_table[texture].height,
+    };
+    return MISO_OK;
+}
+
 void miso_render_destroy_texture(const MisoEngine *const engine, const MisoTextureHandle texture) {
     (void)engine;
 
-    if (texture == 0 || texture >= MISO_TEXTURE_TABLE_MAX || !g_texture_table[texture]) {
+    if (texture == 0 || texture >= MISO_TEXTURE_TABLE_MAX || !g_texture_table[texture].texture) {
         return;
     }
 
-    miso__renderer_destroy_texture(g_texture_table[texture]);
-    g_texture_table[texture] = nullptr;
+    miso__renderer_destroy_texture(g_texture_table[texture].texture);
+    g_texture_table[texture] = (MisoTextureEntry){0};
 }
 
 void miso_render_diag_submit_ui_texture_handle_debug(const MisoEngine *const engine,
@@ -95,11 +130,11 @@ void miso_render_diag_submit_ui_texture_handle_debug(const MisoEngine *const eng
                                                      const float height) {
     (void)engine;
 
-    if (texture == 0 || texture >= MISO_TEXTURE_TABLE_MAX || !g_texture_table[texture]) {
+    if (texture == 0 || texture >= MISO_TEXTURE_TABLE_MAX || !g_texture_table[texture].texture) {
         return;
     }
 
-    miso__renderer_draw_texture_debug(g_texture_table[texture], x, y, width, height);
+    miso__renderer_draw_texture_debug(g_texture_table[texture].texture, x, y, width, height);
 }
 
 MisoResult miso_render_load_font(const MisoEngine *const engine,
@@ -192,11 +227,12 @@ void miso_render_submit_sprites(const MisoEngine *engine,
                                 const int count) {
     (void)engine;
 
-    if (texture == 0 || texture >= MISO_TEXTURE_TABLE_MAX || !instances || count <= 0 || !g_texture_table[texture]) {
+    if (texture == 0 || texture >= MISO_TEXTURE_TABLE_MAX || !instances || count <= 0 ||
+        !g_texture_table[texture].texture) {
         return;
     }
 
-    miso__renderer_draw_sprites(g_texture_table[texture], instances, count);
+    miso__renderer_draw_sprites(g_texture_table[texture].texture, instances, count);
 }
 
 void miso_render_submit_world_geometry(const MisoEngine *const engine,
@@ -279,9 +315,9 @@ void miso__render_shutdown(void) {
     miso__text_shutdown();
 
     for (uint32_t i = 1; i < MISO_TEXTURE_TABLE_MAX; i++) {
-        if (g_texture_table[i]) {
-            miso__renderer_destroy_texture(g_texture_table[i]);
-            g_texture_table[i] = nullptr;
+        if (g_texture_table[i].texture) {
+            miso__renderer_destroy_texture(g_texture_table[i].texture);
+            g_texture_table[i] = (MisoTextureEntry){0};
         }
     }
 

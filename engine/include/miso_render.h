@@ -7,6 +7,20 @@
 typedef uint32_t MisoTextureHandle;
 typedef uint32_t MisoFontHandle;
 
+/**
+ * Describes lightweight metadata for a loaded texture.
+ *
+ * This intentionally describes only renderer-owned texture properties that are
+ * known at load time. It is not an atlas description and does not encode named
+ * regions, import settings, or game semantics.
+ */
+typedef struct MisoTextureInfo {
+    /** Texture width in pixels. */
+    uint32_t width;
+    /** Texture height in pixels. */
+    uint32_t height;
+} MisoTextureInfo;
+
 typedef struct MisoSpriteInstance {
     float x;
     float y;
@@ -44,6 +58,20 @@ typedef struct MisoWorldVertex {
  * \return MISO_OK on success or an error code.
  */
 MisoResult miso_render_load_texture(const MisoEngine *engine, const char *path, MisoTextureHandle *out_texture);
+
+/**
+ * Returns metadata for a loaded texture handle.
+ *
+ * This is intentionally lightweight resource metadata, not a full asset
+ * description. Atlas layout, named regions, and import-time semantic data
+ * remain owned by higher-level asset data.
+ *
+ * \param engine Engine whose renderer owns the texture table.
+ * \param texture Loaded texture handle.
+ * \param out_info Receives texture dimensions.
+ * \return MISO_OK on success or an error code.
+ */
+MisoResult miso_render_get_texture_info(const MisoEngine *engine, MisoTextureHandle texture, MisoTextureInfo *out_info);
 
 /**
  * Destroys a texture handle.

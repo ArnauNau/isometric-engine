@@ -1235,16 +1235,118 @@ SDL_GPUTexture *Renderer_CreateTextureFromSurface(SDL_Surface *const surface) {
     return texture;
 }
 
-SDL_GPUTexture *Renderer_LoadTexture(const char *const path) {
-    SDL_Surface *const surface = SDL_LoadSurface(path);
-    if (!surface) {
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load image %s: %s", path, SDL_GetError());
+SDL_GPUTexture *Renderer_CreateRGBA8Texture(const Uint32 width, const Uint32 height, const void *const rgba8_pixels) {
+    if (width == 0 || height == 0 || !rgba8_pixels) {
         return nullptr;
     }
 
-    SDL_GPUTexture *const texture = Renderer_CreateTextureFromSurface(surface);
-    SDL_DestroySurface(surface);
+    const SDL_GPUTextureCreateInfo tex_info = {
+        .type = SDL_GPU_TEXTURETYPE_2D,
+        .format = SDL_GPU_TEXTUREFORMAT_R8G8B8A8_UNORM,
+        .width = width,
+        .height = height,
+        .layer_count_or_depth = 1,
+        .num_levels = 1,
+        .usage = SDL_GPU_TEXTUREUSAGE_SAMPLER,
+    };
+
+    SDL_GPUTexture *const texture = SDL_CreateGPUTexture(gpu_device, &tex_info);
+    if (!texture) {
+        SDL_LogError(SDL_LOG_CATEGORY_GPU, "Failed to create RGBA8 texture: %s", SDL_GetError());
+        return nullptr;
+    }
+
+    if (!Renderer_UpdateRGBA8Texture(texture, width, height, rgba8_pixels)) {
+        SDL_ReleaseGPUTexture(gpu_device, texture);
+        return nullptr;
+    }
+
     return texture;
+}
+
+bool Renderer_UpdateRGBA8Texture(SDL_GPUTexture *const texture,
+                                 const Uint32 width,
+                                 const Uint32 height,
+                                 const void *const rgba8_pixels) {
+    if (!texture || width == 0 || height == 0 || !rgba8_pixels) {
+        return false;
+    }
+
+    const Uint32 upload_size = width * height * 4U;
+    if (g_frame_active) {
+        g_frame_stats.texture_upload_count++;
+        g_frame_stats.texture_upload_bytes += upload_size;
+        g_frame_stats.transient_buffer_creations++;
+    }
+
+    const SDL_GPUTransferBufferCreateInfo transfer_info = {
+        .usage = SDL_GPU_TRANSFERBUFFERUSAGE_UPLOAD,
+        .size = upload_size,
+    };
+    SDL_GPUTransferBuffer *const transfer_buffer = SDL_CreateGPUTransferBuffer(gpu_device, &transfer_info);
+    if (!transfer_buffer) {
+        return false;
+    }
+
+    Uint8 *const map = (Uint8 *)SDL_MapGPUTransferBuffer(gpu_device, transfer_buffer, true);
+    if (!map) {
+        SDL_ReleaseGPUTransferBuffer(gpu_device, transfer_buffer);
+        return false;
+    }
+    SDL_memcpy(map, rgba8_pixels, upload_size);
+    SDL_UnmapGPUTransferBuffer(gpu_device, transfer_buffer);
+
+    SDL_GPUCommandBuffer *const upload_cmd = SDL_AcquireGPUCommandBuffer(gpu_device);
+    if (!upload_cmd) {
+        SDL_ReleaseGPUTransferBuffer(gpu_device, transfer_buffer);
+        return false;
+    }
+
+    SDL_GPUCopyPass *const copy = SDL_BeginGPUCopyPass(upload_cmd);
+    if (!copy) {
+        SDL_CancelGPUCommandBuffer(upload_cmd);
+        SDL_ReleaseGPUTransferBuffer(gpu_device, transfer_buffer);
+        return false;
+    }
+
+    const SDL_GPUTextureTransferInfo src_info = {
+        .transfer_buffer = transfer_buffer,
+        .offset = 0,
+        .pixels_per_row = width,
+        .rows_per_layer = height,
+    };
+    const SDL_GPUTextureRegion dst_info = {
+        .texture = texture,
+        .w = width,
+        .h = height,
+        .d = 1,
+    };
+
+    SDL_UploadToGPUTexture(copy, &src_info, &dst_info, false);
+    SDL_EndGPUCopyPass(copy);
+    SDL_SubmitGPUCommandBuffer(upload_cmd);
+
+    SDL_ReleaseGPUTransferBuffer(gpu_device, transfer_buffer);
+    return true;
+}
+
+RendererTextureLoadResult Renderer_LoadTexture(const char *const path) {
+    RendererTextureLoadResult result = {0};
+
+    SDL_Surface *const surface = SDL_LoadSurface(path);
+    if (!surface) {
+        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to load image %s: %s", path, SDL_GetError());
+        return result;
+    }
+
+    SDL_GPUTexture *const texture = Renderer_CreateTextureFromSurface(surface);
+    if (texture) {
+        result.texture = texture;
+        result.width = (Uint32)surface->w;
+        result.height = (Uint32)surface->h;
+    }
+    SDL_DestroySurface(surface);
+    return result;
 }
 
 void Renderer_DestroyTexture(SDL_GPUTexture *const texture) {

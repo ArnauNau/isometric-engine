@@ -1,5 +1,6 @@
 #include "miso_tile_scene.h"
 
+#include "internal/miso__renderer_backend.h"
 #include "miso_iso.h"
 
 #include <SDL3/SDL.h>
@@ -58,8 +59,56 @@ static bool miso__tile_scene_valid_desc(const MisoTileSceneDesc *const desc) {
            desc->map.tile_h_px > 0;
 }
 
-static bool miso__tilemap_valid_desc(const MisoTilemapDesc *const desc) {
-    return desc && desc->texture != 0 && desc->atlas_columns > 0 && desc->atlas_rows > 0;
+static bool miso__tile_scene_resolve_atlas_grid(const MisoTileScene *const scene,
+                                                const MisoTextureHandle texture,
+                                                const uint16_t requested_columns,
+                                                const uint16_t requested_rows,
+                                                uint16_t *const out_columns,
+                                                uint16_t *const out_rows) {
+    if (!scene || texture == 0 || !out_columns || !out_rows) {
+        return false;
+    }
+
+    if (requested_columns > 0 && requested_rows > 0) {
+        *out_columns = requested_columns;
+        *out_rows = requested_rows;
+        return true;
+    }
+
+    if (scene->map.tile_w_px <= 0 || scene->map.tile_h_px <= 0) {
+        return false;
+    }
+
+    MisoTextureInfo texture_info = {0};
+    if (miso_render_get_texture_info(scene->engine, texture, &texture_info) != MISO_OK || texture_info.width == 0 ||
+        texture_info.height == 0) {
+        return false;
+    }
+
+    uint32_t columns = requested_columns;
+    uint32_t rows = requested_rows;
+    if (columns == 0) {
+        const uint32_t tile_w = (uint32_t)scene->map.tile_w_px;
+        if (texture_info.width % tile_w != 0U) {
+            return false;
+        }
+        columns = texture_info.width / tile_w;
+    }
+    if (rows == 0) {
+        const uint32_t tile_h = (uint32_t)scene->map.tile_h_px;
+        if (texture_info.height % tile_h != 0U) {
+            return false;
+        }
+        rows = texture_info.height / tile_h;
+    }
+
+    if (columns == 0 || rows == 0 || columns > UINT16_MAX || rows > UINT16_MAX) {
+        return false;
+    }
+
+    *out_columns = (uint16_t)columns;
+    *out_rows = (uint16_t)rows;
+    return true;
 }
 
 static size_t miso__tile_scene_tile_count(const MisoTileScene *const scene) {
@@ -306,7 +355,14 @@ const MisoIsoMapDesc *miso_tile_scene_get_desc(const MisoTileScene *const scene)
 }
 
 MisoTilemap *miso_tilemap_create(MisoTileScene *const scene, const MisoTilemapDesc *const desc) {
-    if (!scene || !miso__tilemap_valid_desc(desc)) {
+    if (!scene || !desc || desc->texture == 0) {
+        return nullptr;
+    }
+
+    uint16_t atlas_columns = 0;
+    uint16_t atlas_rows = 0;
+    if (!miso__tile_scene_resolve_atlas_grid(
+            scene, desc->texture, desc->atlas_columns, desc->atlas_rows, &atlas_columns, &atlas_rows)) {
         return nullptr;
     }
 
@@ -326,8 +382,8 @@ MisoTilemap *miso_tilemap_create(MisoTileScene *const scene, const MisoTilemapDe
 
     tilemap->scene = scene;
     tilemap->texture = desc->texture;
-    tilemap->atlas_columns = desc->atlas_columns;
-    tilemap->atlas_rows = desc->atlas_rows;
+    tilemap->atlas_columns = atlas_columns;
+    tilemap->atlas_rows = atlas_rows;
     tilemap->cache_dirty = true;
     return tilemap;
 }
@@ -605,8 +661,15 @@ int miso_tile_scene_get_objects(const MisoTileScene *const scene,
 }
 
 MisoResult miso_tile_scene_set_object_visual(MisoTileScene *const scene, const MisoTileObjectVisualDesc *const desc) {
-    if (!scene || !desc || desc->visual_id == 0 || desc->texture == 0 || desc->atlas_columns == 0 ||
-        desc->atlas_rows == 0 || desc->sprite_w_tiles <= 0 || desc->sprite_h_tiles <= 0) {
+    if (!scene || !desc || desc->visual_id == 0 || desc->texture == 0 || desc->sprite_w_tiles <= 0 ||
+        desc->sprite_h_tiles <= 0) {
+        return MISO_ERR_INVALID_ARG;
+    }
+
+    uint16_t atlas_columns = 0;
+    uint16_t atlas_rows = 0;
+    if (!miso__tile_scene_resolve_atlas_grid(
+            scene, desc->texture, desc->atlas_columns, desc->atlas_rows, &atlas_columns, &atlas_rows)) {
         return MISO_ERR_INVALID_ARG;
     }
 
@@ -621,8 +684,8 @@ MisoResult miso_tile_scene_set_object_visual(MisoTileScene *const scene, const M
     *visual = (MisoTileObjectVisualRecord){
         .visual_id = desc->visual_id,
         .texture = desc->texture,
-        .atlas_columns = desc->atlas_columns,
-        .atlas_rows = desc->atlas_rows,
+        .atlas_columns = atlas_columns,
+        .atlas_rows = atlas_rows,
         .atlas_tile_id = desc->atlas_tile_id,
         .sprite_w_tiles = desc->sprite_w_tiles,
         .sprite_h_tiles = desc->sprite_h_tiles,

@@ -15,6 +15,22 @@ typedef struct RendererConfig {
 } RendererConfig;
 
 /**
+ * @brief Result of decoding and uploading an image file through the low-level renderer.
+ *
+ * This is private renderer-boundary transport, not an engine resource handle.
+ * The caller owns the returned GPU texture and can copy width/height into its
+ * own handle table or asset metadata.
+ */
+typedef struct RendererTextureLoadResult {
+    ///< Uploaded GPU texture, or NULL when loading failed.
+    SDL_GPUTexture *texture;
+    ///< Decoded image width in pixels.
+    Uint32 width;
+    ///< Decoded image height in pixels.
+    Uint32 height;
+} RendererTextureLoadResult;
+
+/**
  * @brief Sprite instance data for GPU-batched rendering.
  *
  * Each instance represents one sprite in a batched draw call. The layout
@@ -114,11 +130,23 @@ void Renderer_SetVSync(bool enabled);
 
 // Uploads an existing CPU surface to the GPU. The caller retains ownership of the surface.
 SDL_GPUTexture *Renderer_CreateTextureFromSurface(SDL_Surface *surface);
+SDL_GPUTexture *Renderer_CreateRGBA8Texture(Uint32 width, Uint32 height, const void *rgba8_pixels);
+bool Renderer_UpdateRGBA8Texture(SDL_GPUTexture *texture, Uint32 width, Uint32 height, const void *rgba8_pixels);
 
-// Loads a PNG/BMP with SDL's built-in surface loader, uploads it to the GPU, and returns a texture.
-// TODO(asset-loading): introduce an engine-owned image loader that can deliberately choose
-// SDL_LoadSurface or SDL_image per format/build mode before broadening supported runtime formats.
-SDL_GPUTexture *Renderer_LoadTexture(const char *path);
+/**
+ * @brief Load an image with SDL's built-in surface loader and upload it.
+ *
+ * Current support follows SDL_LoadSurface(), primarily PNG/BMP in this build.
+ * Unsupported or failed loads return a zero-initialized result.
+ *
+ * @param path Image file path.
+ * @return Uploaded texture and decoded dimensions, or zero on failure.
+ *
+ * TODO(asset-loading): introduce an engine-owned image loader that can
+ * deliberately choose SDL_LoadSurface or SDL_image per format/build mode before
+ * broadening supported runtime formats.
+ */
+RendererTextureLoadResult Renderer_LoadTexture(const char *path);
 void Renderer_DestroyTexture(SDL_GPUTexture *texture);
 
 void Renderer_BeginFrame(void);
@@ -149,7 +177,7 @@ void Renderer_SetViewProjection(const float *viewProjMatrix);
  * @param phase     Phase offset multiplier for tile position (controls wave width).
  *
  * @see SpriteInstance for per-tile water flag.
- * @see Tilemap_Render() which uses these parameters automatically.
+ * @see miso_tilemap_render() which uses these parameters automatically.
  */
 void Renderer_SetWaterParams(float time, float speed, float amplitude, float phase);
 
