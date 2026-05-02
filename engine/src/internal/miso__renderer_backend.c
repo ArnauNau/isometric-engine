@@ -72,7 +72,24 @@ void miso__renderer_destroy_texture(SDL_GPUTexture *texture) {
     Renderer_DestroyTexture(texture);
 }
 
-void miso__renderer_set_view_projection(const float *view_projection) {
+SDL_GPUTexture *miso__renderer_create_rgba8_texture(const int width, const int height, const void *const rgba8_pixels) {
+    if (width <= 0 || height <= 0) {
+        return nullptr;
+    }
+    return Renderer_CreateRGBA8Texture((Uint32)width, (Uint32)height, rgba8_pixels);
+}
+
+bool miso__renderer_update_rgba8_texture(SDL_GPUTexture *const texture,
+                                         const int width,
+                                         const int height,
+                                         const void *const rgba8_pixels) {
+    if (!texture || width <= 0 || height <= 0 || !rgba8_pixels) {
+        return false;
+    }
+    return Renderer_UpdateRGBA8Texture(texture, (Uint32)width, (Uint32)height, rgba8_pixels);
+}
+
+void miso__renderer_set_view_projection(const float *const view_projection) {
     Renderer_SetViewProjection(view_projection);
 }
 
@@ -80,7 +97,14 @@ void miso__renderer_set_water_params(const float time, const float speed, const 
     Renderer_SetWaterParams(time, speed, amplitude, phase);
 }
 
-void miso__renderer_draw_sprites(SDL_GPUTexture *texture, const void *instances, int count) {
+void miso__renderer_set_sprite_tint_overlay(SDL_GPUTexture *const texture,
+                                            const int width,
+                                            const int height,
+                                            const float strength) {
+    Renderer_SetSpriteTintOverlay(texture, width > 0 ? (Uint32)width : 0U, height > 0 ? (Uint32)height : 0U, strength);
+}
+
+void miso__renderer_draw_sprites(SDL_GPUTexture *const texture, const void *const instances, const int count) {
     Renderer_DrawSprites(texture, (const SpriteInstance *)instances, count);
 }
 

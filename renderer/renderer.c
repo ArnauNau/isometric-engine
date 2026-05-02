@@ -54,6 +54,7 @@ static Uint32 g_allowed_frames_in_flight = RENDERER_DEFAULT_ALLOWED_FRAMES_IN_FL
 typedef struct {
     float viewProjection[16];
     float waterParams[4];
+    float overlayParams[4]; // x=width, y=height, z=strength, w=enabled
 } SpriteUniforms;
 
 typedef struct {
@@ -70,6 +71,7 @@ typedef struct {
 
 typedef struct {
     SDL_GPUTexture *texture;
+    SDL_GPUTexture *overlay_texture;
     Uint32 first_instance;
     Uint32 instance_count;
     SpriteUniforms uniforms;
@@ -104,6 +106,8 @@ typedef struct {
 } UITextCmd;
 
 static SpriteUniforms sprite_uniforms = {0};
+static SDL_GPUTexture *sprite_tint_overlay_texture = nullptr;
+static SDL_GPUTexture *default_overlay_texture = nullptr;
 
 static RendererUploadStream sprite_stream = {0};
 static RendererUploadStream world_geom_stream = {0};
@@ -465,9 +469,15 @@ static void renderer_set_full_swapchain_viewport(SDL_GPURenderPass *const pass) 
     SDL_SetGPUViewport(pass, &viewport);
 }
 
-static void renderer_bind_sprite_pipeline(SDL_GPURenderPass *const pass, SDL_GPUTexture *const texture) {
+static void renderer_bind_sprite_pipeline(SDL_GPURenderPass *const pass,
+                                          SDL_GPUTexture *const texture,
+                                          SDL_GPUTexture *const overlay_texture) {
     SDL_BindGPUGraphicsPipeline(pass, sprite_pipeline);
-    SDL_BindGPUFragmentSamplers(pass, 0, &((SDL_GPUTextureSamplerBinding){.texture = texture, .sampler = sampler}), 1);
+    SDL_GPUTextureSamplerBinding bindings[2] = {
+        {.texture = texture, .sampler = sampler},
+        {.texture = overlay_texture ? overlay_texture : default_overlay_texture, .sampler = sampler},
+    };
+    SDL_BindGPUFragmentSamplers(pass, 0, bindings, 2);
     SDL_BindGPUVertexStorageBuffers(pass, 0, &sprite_stream.gpu, 1);
 }
 
@@ -494,18 +504,23 @@ static void renderer_draw_world_pass(SDL_GPUCommandBuffer *const cmd) {
     renderer_set_full_swapchain_viewport(pass);
 
     const SDL_GPUTexture *bound_sprite_tex = nullptr;
+    const SDL_GPUTexture *bound_overlay_tex = nullptr;
     for (Uint32 i = 0; i < sprite_cmd_count; i++) {
         const SpriteCmd *const cmdi = &sprite_cmds[i];
         if (!cmdi->texture || cmdi->instance_count == 0) {
             continue;
         }
 
-        if (bound_sprite_tex != cmdi->texture) {
-            renderer_bind_sprite_pipeline(pass, cmdi->texture);
+        const SDL_GPUTexture *const overlay_tex =
+            cmdi->overlay_texture ? cmdi->overlay_texture : default_overlay_texture;
+        if (bound_sprite_tex != cmdi->texture || bound_overlay_tex != overlay_tex) {
+            renderer_bind_sprite_pipeline(pass, cmdi->texture, cmdi->overlay_texture);
             bound_sprite_tex = cmdi->texture;
+            bound_overlay_tex = overlay_tex;
         }
 
         SDL_PushGPUVertexUniformData(cmd, 0, &cmdi->uniforms, sizeof(SpriteUniforms));
+        SDL_PushGPUFragmentUniformData(cmd, 0, &cmdi->uniforms, sizeof(SpriteUniforms));
         SDL_DrawGPUPrimitives(pass, 6, cmdi->instance_count, 0, cmdi->first_instance);
 
         g_frame_stats.queues[RENDERER_STATS_QUEUE_SPRITE].draw_calls++;
@@ -735,7 +750,7 @@ bool Renderer_Init(SDL_Window *const window, const RendererConfig *const config)
     SDL_GPUShader *const sprite_vs =
         LoadShader(gpu_device, config->sprite_shader_path, "vertex_main", 0, 1, 1, 0, SDL_GPU_SHADERSTAGE_VERTEX);
     SDL_GPUShader *const sprite_fs =
-        LoadShader(gpu_device, config->sprite_shader_path, "fragment_main", 1, 0, 0, 0, SDL_GPU_SHADERSTAGE_FRAGMENT);
+        LoadShader(gpu_device, config->sprite_shader_path, "fragment_main", 2, 1, 0, 0, SDL_GPU_SHADERSTAGE_FRAGMENT);
     if (!sprite_vs || !sprite_fs) {
         return false;
     }
@@ -942,6 +957,13 @@ bool Renderer_Init(SDL_Window *const window, const RendererConfig *const config)
         return false;
     }
 
+    const uint8_t transparent_overlay[4] = {0, 0, 0, 0};
+    default_overlay_texture = Renderer_CreateRGBA8Texture(1, 1, transparent_overlay);
+    if (!default_overlay_texture) {
+        SDL_LogError(SDL_LOG_CATEGORY_GPU, "Failed to create default sprite overlay texture");
+        return false;
+    }
+
     int w = 1;
     int h = 1;
     SDL_GetWindowSizeInPixels(window, &w, &h);
@@ -975,6 +997,7 @@ bool Renderer_Init(SDL_Window *const window, const RendererConfig *const config)
     sprite_uniforms.viewProjection[5] = 1.0f;
     sprite_uniforms.viewProjection[10] = 1.0f;
     sprite_uniforms.viewProjection[15] = 1.0f;
+    Renderer_SetSpriteTintOverlay(nullptr, 0, 0, 0.0f);
 
     return true;
 }
@@ -1004,6 +1027,11 @@ void Renderer_Shutdown(void) {
         SDL_ReleaseGPUSampler(gpu_device, sampler);
         sampler = nullptr;
     }
+    if (default_overlay_texture) {
+        SDL_ReleaseGPUTexture(gpu_device, default_overlay_texture);
+        default_overlay_texture = nullptr;
+    }
+    sprite_tint_overlay_texture = nullptr;
 
     if (sprite_pipeline) {
         SDL_ReleaseGPUGraphicsPipeline(gpu_device, sprite_pipeline);
@@ -1475,7 +1503,20 @@ void Renderer_SetWaterParams(const float time, const float speed, const float am
     sprite_uniforms.waterParams[3] = phase;
 }
 
-void Renderer_DrawSprites(SDL_GPUTexture *const texture, const SpriteInstance *const instances, const int count) {
+void Renderer_SetSpriteTintOverlay(SDL_GPUTexture *const texture,
+                                   const Uint32 width,
+                                   const Uint32 height,
+                                   const float strength) {
+    sprite_tint_overlay_texture = texture;
+    sprite_uniforms.overlayParams[0] = (float)width;
+    sprite_uniforms.overlayParams[1] = (float)height;
+    sprite_uniforms.overlayParams[2] = SDL_clamp(strength, 0.0f, 1.0f);
+    sprite_uniforms.overlayParams[3] = texture && width > 0 && height > 0 && strength > 0.0f ? 1.0f : 0.0f;
+}
+
+void Renderer_DrawSprites(SDL_GPUTexture *const texture,
+                          const SpriteInstance *const restrict instances,
+                          const int count) {
     if (!texture || !instances || count <= 0 || !cmd_buffer || !swapchain_texture || frame_queues_flushed) {
         return;
     }
@@ -1495,7 +1536,8 @@ void Renderer_DrawSprites(SDL_GPUTexture *const texture, const SpriteInstance *c
     SpriteCmd *cmd = nullptr;
     if (sprite_cmd_count > 0) {
         SpriteCmd *last = &sprite_cmds[sprite_cmd_count - 1U];
-        if (last->texture == texture && SDL_memcmp(&last->uniforms, &sprite_uniforms, sizeof(SpriteUniforms)) == 0 &&
+        if (last->texture == texture && last->overlay_texture == sprite_tint_overlay_texture &&
+            SDL_memcmp(&last->uniforms, &sprite_uniforms, sizeof(SpriteUniforms)) == 0 &&
             last->first_instance + last->instance_count == instance_base) {
             last->instance_count += (Uint32)count;
             cmd = last;
@@ -1509,6 +1551,7 @@ void Renderer_DrawSprites(SDL_GPUTexture *const texture, const SpriteInstance *c
         }
         cmd = &sprite_cmds[sprite_cmd_count++];
         cmd->texture = texture;
+        cmd->overlay_texture = sprite_tint_overlay_texture;
         cmd->first_instance = instance_base;
         cmd->instance_count = (Uint32)count;
         cmd->uniforms = sprite_uniforms;

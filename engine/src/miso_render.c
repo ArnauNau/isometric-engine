@@ -339,7 +339,7 @@ void miso__render_shutdown(void) {
 
 TTF_Font *miso__render_get_font_ptr(const MisoFontHandle font) {
     if (font == 0 || font >= MISO_FONT_TABLE_MAX || !g_font_table[font].font) {
-        return NULL;
+        return nullptr;
     }
 
     return g_font_table[font].font;

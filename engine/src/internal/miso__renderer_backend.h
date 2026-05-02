@@ -68,8 +68,11 @@ void miso__renderer_end_frame(void);
  */
 SDL_GPUTexture *miso__renderer_load_texture(const char *path, uint32_t *out_width, uint32_t *out_height);
 void miso__renderer_destroy_texture(SDL_GPUTexture *texture);
+SDL_GPUTexture *miso__renderer_create_rgba8_texture(int width, int height, const void *rgba8_pixels);
+bool miso__renderer_update_rgba8_texture(SDL_GPUTexture *texture, int width, int height, const void *rgba8_pixels);
 void miso__renderer_set_view_projection(const float *view_projection);
 void miso__renderer_set_water_params(float time, float speed, float amplitude, float phase);
+void miso__renderer_set_sprite_tint_overlay(SDL_GPUTexture *texture, int width, int height, float strength);
 void miso__renderer_draw_sprites(SDL_GPUTexture *texture, const void *instances, int count);
 void miso__renderer_draw_native_sprites(void *texture, const void *instances, int count);
 void miso__renderer_draw_line_batch(const float *vertices_xyz, int vertex_count, SDL_FColor color);

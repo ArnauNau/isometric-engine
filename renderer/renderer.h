@@ -180,6 +180,7 @@ void Renderer_SetViewProjection(const float *viewProjMatrix);
  * @see miso_tilemap_render() which uses these parameters automatically.
  */
 void Renderer_SetWaterParams(float time, float speed, float amplitude, float phase);
+void Renderer_SetSpriteTintOverlay(SDL_GPUTexture *texture, Uint32 width, Uint32 height, float strength);
 
 /**
  * @brief Draw a batch of sprites using GPU instancing.
@@ -195,7 +196,7 @@ void Renderer_SetWaterParams(float time, float speed, float amplitude, float pha
  * @pre Renderer_BeginFrame() has been called.
  * @pre Renderer_SetViewProjection() has been called.
  */
-void Renderer_DrawSprites(SDL_GPUTexture *texture, const SpriteInstance *instances, int count);
+void Renderer_DrawSprites(SDL_GPUTexture *texture, const SpriteInstance *restrict instances, int count);
 
 // Update the camera/view projection
 void Renderer_DrawLine(float x1, float y1, float z1, float x2, float y2, float z2, SDL_FColor color);
