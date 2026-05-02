@@ -80,6 +80,8 @@ struct TestbedGame {
     MisoTextureHandle tile_texture;
     MisoTileScene *tile_scene;
     MisoTilemap *tilemap;
+    MisoTileOverlay *tile_tint_overlay;
+    bool boat_placement_overlay_enabled;
 
     int building_count;
     RenderableComponent renderables[MAX_BUILDINGS];
@@ -267,6 +269,34 @@ static bool testbed_is_tile_free(const TestbedGame *const game, const int tx, co
         .occupied_mask = MISO_TILE_OCCUPANCY_OBJECT,
     };
     return (miso_tile_scene_check_placement(game->tile_scene, game->tilemap, &query) & MISO_TILE_PLACE_OCCUPIED) == 0;
+}
+
+static void testbed_update_boat_placement_overlay(TestbedGame *const game) {
+    const MisoIsoMapDesc *const desc = testbed_map_desc(game);
+    if (!game || !game->tile_scene || !game->tilemap || !game->tile_tint_overlay || !desc) {
+        return;
+    }
+
+    if (!game->boat_placement_overlay_enabled) {
+        miso_tile_overlay_clear(game->tile_tint_overlay, 0x00000000U);
+        return;
+    }
+
+    const MisoTileFootprint footprint = {.width = 1, .height = 3, .anchor_x = 0, .anchor_y = 2};
+    for (int y = 0; y < desc->height_tiles; y++) {
+        for (int x = 0; x < desc->width_tiles; x++) {
+            const MisoTilePlacementQuery query = {
+                .tile_x = x,
+                .tile_y = y,
+                .footprint = footprint,
+                .occupied_mask = MISO_TILE_OCCUPANCY_OBJECT,
+            };
+            const MisoTilePlacementProblemMask result =
+                miso_tile_scene_check_placement(game->tile_scene, game->tilemap, &query);
+            const uint32_t color = result == MISO_TILE_PLACE_OK ? 0x00FF00B0U : 0xFF0000A0U;
+            (void)miso_tile_overlay_set_tile_rgba8(game->tile_tint_overlay, x, y, color);
+        }
+    }
 }
 
 static void testbed_apply_benchmark_camera_preset(TestbedGame *const game) {
@@ -619,6 +649,7 @@ static void testbed_spawn_boat(TestbedGame *const game, const int x, const int y
         testbed_build_wireframe_mesh(iso_x, iso_y, iso_w, iso_h, 1, 3, 2, 3, wire_depth);
 
     game->building_count++;
+    testbed_update_boat_placement_overlay(game);
 }
 
 static void testbed_spawn_boats(TestbedGame *const game, const int amount) {
@@ -628,10 +659,11 @@ static void testbed_spawn_boats(TestbedGame *const game, const int amount) {
     }
 
     int count = 0;
+    bool changed = false;
     for (int y = desc->height_tiles - 1; y >= 2; y -= 3) {
         for (int x = 0; x < desc->width_tiles; x++) {
             if (count >= amount || game->building_count >= MAX_BUILDINGS) {
-                return;
+                goto done;
             }
 
             const MisoTileFootprint footprint = {.width = 1, .height = 3, .anchor_x = 0, .anchor_y = 2};
@@ -686,8 +718,14 @@ static void testbed_spawn_boats(TestbedGame *const game, const int amount) {
 
                 game->building_count++;
                 count++;
+                changed = true;
             }
         }
+    }
+
+done:
+    if (changed) {
+        testbed_update_boat_placement_overlay(game);
     }
 }
 
@@ -747,6 +785,13 @@ static void testbed_game_on_event(void *const ctx, const MisoEvent *const event)
             break;
         case SDLK_P:
             game->debug_mode = !game->debug_mode;
+            break;
+        case SDLK_B:
+            if (event->data.key.repeat) {
+                break;
+            }
+            game->boat_placement_overlay_enabled = !game->boat_placement_overlay_enabled;
+            testbed_update_boat_placement_overlay(game);
             break;
         case SDLK_PLUS:
         case SDLK_KP_PLUS:
@@ -1289,6 +1334,7 @@ static void testbed_reset_demo_scene(TestbedGame *const game, const int spawn_co
     if (spawn_count > 0) {
         testbed_spawn_boats(game, spawn_count);
     }
+    testbed_update_boat_placement_overlay(game);
 }
 
 MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
@@ -1396,20 +1442,29 @@ MisoResult testbed_game_create(MisoEngine *engine, TestbedGame **out_game) {
 
     const MisoTilemapDesc tilemap_desc = {
         .texture = game->tile_texture,
-        .atlas_columns = 6,
-        .atlas_rows = 12,
+        .atlas_columns = 0,
+        .atlas_rows = 0,
     };
     game->tilemap = miso_tilemap_create(game->tile_scene, &tilemap_desc);
     if (!game->tilemap) {
         testbed_game_destroy(game);
         return MISO_ERR_OUT_OF_MEMORY;
     }
+    const MisoTileOverlayDesc tint_overlay_desc = {
+        .clear_rgba8 = 0x00000000u,
+    };
+    game->tile_tint_overlay = miso_tile_overlay_create(game->tile_scene, &tint_overlay_desc);
+    if (!game->tile_tint_overlay) {
+        testbed_game_destroy(game);
+        return MISO_ERR_OUT_OF_MEMORY;
+    }
+    miso_tilemap_set_tint_overlay(game->tilemap, game->tile_tint_overlay, 1.0f);
 
     const MisoTileObjectVisualDesc boat_visual = {
         .visual_id = TILE_PLACEHOLDER_BOAT,
         .texture = game->tile_texture,
-        .atlas_columns = 6,
-        .atlas_rows = 12,
+        .atlas_columns = 0,
+        .atlas_rows = 0,
         .atlas_tile_id = TILE_PLACEHOLDER_BOAT,
         .sprite_w_tiles = 2,
         .sprite_h_tiles = 3,
@@ -1444,6 +1499,10 @@ void testbed_game_destroy(TestbedGame *game) {
     if (game->tilemap) {
         miso_tilemap_destroy(game->tilemap);
         game->tilemap = nullptr;
+    }
+    if (game->tile_tint_overlay) {
+        miso_tile_overlay_destroy(game->tile_tint_overlay);
+        game->tile_tint_overlay = nullptr;
     }
     if (game->tile_scene) {
         miso_tile_scene_destroy(game->tile_scene);
