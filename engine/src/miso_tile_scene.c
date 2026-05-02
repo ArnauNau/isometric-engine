@@ -48,10 +48,19 @@ struct MisoTilemap {
     MisoTextureHandle texture;
     uint16_t atlas_columns;
     uint16_t atlas_rows;
+    float tint_overlay_strength;
+    bool cache_dirty;
     uint32_t *tiles;
     uint32_t *flags;
     MisoSpriteInstance *render_cache;
-    bool cache_dirty;
+    MisoTileOverlay *tint_overlay;
+};
+
+struct MisoTileOverlay {
+    MisoTileScene *scene;
+    uint8_t *rgba8;
+    SDL_GPUTexture *texture;
+    bool dirty;
 };
 
 static bool miso__tile_scene_valid_desc(const MisoTileSceneDesc *const desc) {
@@ -127,6 +136,17 @@ static bool miso__tile_footprint_valid(const MisoTileFootprint *const footprint)
     return footprint && footprint->width > 0 && footprint->height > 0 && footprint->anchor_x >= 0 &&
            footprint->anchor_y >= 0 && footprint->anchor_x < footprint->width &&
            footprint->anchor_y < footprint->height;
+}
+
+static void miso__tile_overlay_store_rgba8(uint8_t *const dst, const uint32_t rgba8) {
+    dst[0] = (uint8_t)((rgba8 >> 24U) & 0xFFU);
+    dst[1] = (uint8_t)((rgba8 >> 16U) & 0xFFU);
+    dst[2] = (uint8_t)((rgba8 >> 8U) & 0xFFU);
+    dst[3] = (uint8_t)(rgba8 & 0xFFU);
+}
+
+static uint32_t miso__tile_overlay_load_rgba8(const uint8_t *const src) {
+    return ((uint32_t)src[0] << 24U) | ((uint32_t)src[1] << 16U) | ((uint32_t)src[2] << 8U) | (uint32_t)src[3];
 }
 
 static void miso__tile_footprint_bounds(const int anchor_tx,
@@ -397,6 +417,104 @@ void miso_tilemap_destroy(MisoTilemap *const tilemap) {
     SDL_free(tilemap->flags);
     SDL_free(tilemap->tiles);
     SDL_free(tilemap);
+}
+
+MisoTileOverlay *miso_tile_overlay_create(MisoTileScene *const scene, const MisoTileOverlayDesc *const desc) {
+    if (!scene) {
+        return nullptr;
+    }
+
+    MisoTileOverlay *const overlay = SDL_calloc(1, sizeof(MisoTileOverlay));
+    if (!overlay) {
+        return nullptr;
+    }
+
+    overlay->scene = scene;
+    overlay->rgba8 = SDL_malloc(miso__tile_scene_tile_count(scene) * 4U);
+    if (!overlay->rgba8) {
+        SDL_free(overlay);
+        return nullptr;
+    }
+
+    miso_tile_overlay_clear(overlay, desc ? desc->clear_rgba8 : 0x00000000U);
+    return overlay;
+}
+
+void miso_tile_overlay_destroy(MisoTileOverlay *const overlay) {
+    if (!overlay) {
+        return;
+    }
+
+    if (overlay->texture) {
+        miso__renderer_destroy_texture(overlay->texture);
+    }
+    SDL_free(overlay->rgba8);
+    SDL_free(overlay);
+}
+
+void miso_tile_overlay_clear(MisoTileOverlay *const overlay, const uint32_t rgba8) {
+    if (!overlay || !overlay->scene || !overlay->rgba8) {
+        return;
+    }
+
+    const size_t tile_count = miso__tile_scene_tile_count(overlay->scene);
+    for (size_t i = 0; i < tile_count; i++) {
+        miso__tile_overlay_store_rgba8(&overlay->rgba8[i * 4U], rgba8);
+    }
+    overlay->dirty = true;
+}
+
+bool miso_tile_overlay_set_tile_rgba8(MisoTileOverlay *const overlay,
+                                      const int tx,
+                                      const int ty,
+                                      const uint32_t rgba8) {
+    if (!overlay || !miso__tile_scene_in_bounds(overlay->scene, tx, ty)) {
+        return false;
+    }
+
+    const size_t idx = miso__tile_scene_index(overlay->scene, tx, ty);
+    miso__tile_overlay_store_rgba8(&overlay->rgba8[idx * 4U], rgba8);
+    overlay->dirty = true;
+    return true;
+}
+
+uint32_t miso_tile_overlay_get_tile_rgba8(const MisoTileOverlay *const overlay, const int tx, const int ty) {
+    if (!overlay || !miso__tile_scene_in_bounds(overlay->scene, tx, ty)) {
+        return 0;
+    }
+
+    const size_t idx = miso__tile_scene_index(overlay->scene, tx, ty);
+    return miso__tile_overlay_load_rgba8(&overlay->rgba8[idx * 4U]);
+}
+
+void miso_tile_overlay_fill_footprint(MisoTileOverlay *const overlay,
+                                      const int tile_x,
+                                      const int tile_y,
+                                      const MisoTileFootprint footprint,
+                                      const uint32_t rgba8) {
+    if (!overlay || !miso__tile_footprint_valid(&footprint)) {
+        return;
+    }
+
+    int min_x = 0;
+    int min_y = 0;
+    int max_x = 0;
+    int max_y = 0;
+    miso__tile_footprint_bounds(tile_x, tile_y, &footprint, &min_x, &min_y, &max_x, &max_y);
+    for (int y = min_y; y <= max_y; y++) {
+        for (int x = min_x; x <= max_x; x++) {
+            (void)miso_tile_overlay_set_tile_rgba8(overlay, x, y, rgba8);
+        }
+    }
+}
+
+void miso_tilemap_set_tint_overlay(MisoTilemap *const tilemap, MisoTileOverlay *const overlay, const float strength) {
+    if (!tilemap || (overlay && overlay->scene != tilemap->scene)) {
+        return;
+    }
+
+    tilemap->tint_overlay = overlay;
+    tilemap->tint_overlay_strength = SDL_clamp(strength, 0.0f, 1.0f);
 }
 
 bool miso_tilemap_set_tile(MisoTilemap *const tilemap, const int tx, const int ty, const uint32_t tile_id) {
@@ -820,8 +938,17 @@ void miso_tilemap_render(const MisoEngine *const engine,
         miso__tilemap_rebuild_cache(tilemap, scene);
     }
 
+    if (tilemap->tint_overlay && !miso__tile_overlay_sync_gpu(tilemap->tint_overlay)) {
+        return;
+    }
+
     miso_render_begin_world(engine, camera_id);
-    miso_render_submit_sprites(
-        engine, tilemap->texture, tilemap->render_cache, (int)miso__tile_scene_tile_count(scene));
+    if (tilemap->tint_overlay && tilemap->tint_overlay->texture && tilemap->tint_overlay_strength > 0.0f) {
+        miso__renderer_set_sprite_tint_overlay(tilemap->tint_overlay->texture,
+                                               scene->map.width_tiles,
+                                               scene->map.height_tiles,
+                                               tilemap->tint_overlay_strength);
+    }
+    miso__renderer_set_sprite_tint_overlay(nullptr, 0, 0, 0.0f);
     miso_render_end_world(engine);
 }

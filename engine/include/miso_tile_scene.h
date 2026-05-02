@@ -8,6 +8,7 @@
 
 typedef struct MisoTileScene MisoTileScene;
 typedef struct MisoTilemap MisoTilemap;
+typedef struct MisoTileOverlay MisoTileOverlay;
 
 typedef uint32_t MisoTileObjectId;
 typedef uint32_t MisoTileObjectTypeId;
@@ -75,6 +76,11 @@ typedef struct MisoTilemapDesc {
     /** Atlas row count, or 0 to derive from texture height and scene tile height. */
     uint16_t atlas_rows;
 } MisoTilemapDesc;
+
+typedef struct MisoTileOverlayDesc {
+    /** Initial color for every overlay tile, encoded as 0xRRGGBBAA. */
+    uint32_t clear_rgba8;
+} MisoTileOverlayDesc;
 
 typedef struct MisoTileFootprint {
     int width;
@@ -193,6 +199,37 @@ uint32_t miso_tilemap_get_flags(const MisoTilemap *tilemap, int tx, int ty);
  * \param flags Bitmask assigned to every tile.
  */
 void miso_tilemap_fill(MisoTilemap *tilemap, uint32_t tile_id, uint32_t flags);
+
+/**
+ * Creates an RGBA8 per-tile overlay buffer for a scene.
+ *
+ * Overlay data is CPU-owned by the engine and uploaded lazily when rendered as
+ * a tilemap tint overlay. Colors use 0xRRGGBBAA. The overlay does not encode
+ * game semantics; games decide what each color means.
+ *
+ * \param scene Scene whose tile dimensions define the overlay buffer size.
+ * \param desc Overlay creation data.
+ * \return New overlay, or NULL on failure.
+ */
+MisoTileOverlay *miso_tile_overlay_create(MisoTileScene *scene, const MisoTileOverlayDesc *desc);
+void miso_tile_overlay_destroy(MisoTileOverlay *overlay);
+void miso_tile_overlay_clear(MisoTileOverlay *overlay, uint32_t rgba8);
+bool miso_tile_overlay_set_tile_rgba8(MisoTileOverlay *overlay, int tx, int ty, uint32_t rgba8);
+uint32_t miso_tile_overlay_get_tile_rgba8(const MisoTileOverlay *overlay, int tx, int ty);
+void miso_tile_overlay_fill_footprint(
+    MisoTileOverlay *overlay, int tile_x, int tile_y, MisoTileFootprint footprint, uint32_t rgba8);
+/**
+ * Attaches or detaches a terrain tint overlay for tilemap rendering.
+ *
+ * Passing NULL disables tinting. Strength is clamped by the renderer. The
+ * current implementation tints terrain sprites; object/agent tinting remains a
+ * separate policy decision.
+ *
+ * \param tilemap Tilemap whose terrain render should use the overlay.
+ * \param overlay Overlay to sample, or NULL to disable tinting.
+ * \param strength Tint strength in the range [0, 1].
+ */
+void miso_tilemap_set_tint_overlay(MisoTilemap *tilemap, MisoTileOverlay *overlay, float strength);
 
 MisoTilePlacementProblem miso_tile_scene_check_placement(const MisoTileScene *scene,
                                                          const MisoTilemap *tilemap,
