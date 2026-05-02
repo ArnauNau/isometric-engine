@@ -154,8 +154,9 @@ void miso_render_set_water_params(const MisoEngine *engine, float time, float sp
  * Submits batched world sprites using a loaded texture.
  *
  * Invalid texture handles, NULL instance arrays, or non-positive counts are
- * ignored. MisoSpriteInstance fields are consumed by the active sprite shader
- * and batching path.
+ * ignored. The instance array must not alias renderer-owned upload storage.
+ * MisoSpriteInstance fields are consumed by the active sprite shader and
+ * batching path.
  *
  * \param engine Engine whose renderer is active.
  * \param texture Texture handle used by all submitted sprites.
@@ -164,7 +165,7 @@ void miso_render_set_water_params(const MisoEngine *engine, float time, float sp
  */
 void miso_render_submit_sprites(const MisoEngine *engine,
                                 MisoTextureHandle texture,
-                                const MisoSpriteInstance *instances,
+                                const MisoSpriteInstance *restrict instances,
                                 int count);
 
 /**
@@ -172,19 +173,21 @@ void miso_render_submit_sprites(const MisoEngine *engine,
  *
  * Vertices are interpreted as a triangle list in the active world transform.
  * NULL input, non-positive counts, or temporary allocation failure are ignored.
+ * The vertex array must not alias renderer-owned scratch/upload storage.
  *
  * \param engine Engine whose renderer is active.
  * \param vertices Triangle-list vertices.
  * \param count Number of vertices.
  */
-void miso_render_submit_world_geometry(const MisoEngine *engine, const MisoWorldVertex *vertices, int count);
+void miso_render_submit_world_geometry(const MisoEngine *engine, const MisoWorldVertex *restrict vertices, int count);
 
 /**
  * Submits world-space line segments.
  *
  * \p vertices_xyz contains x/y/z triples. \p vertex_count is a count of
  * vertices, not floats, and must be even because each pair forms one segment.
- * Invalid input is ignored. Colors use 0xRRGGBBAA.
+ * Invalid input is ignored. The vertex array must not alias renderer-owned
+ * upload storage. Colors use 0xRRGGBBAA.
  *
  * \param engine Engine whose renderer is active.
  * \param vertices_xyz Packed x/y/z vertex triples.
@@ -192,7 +195,7 @@ void miso_render_submit_world_geometry(const MisoEngine *engine, const MisoWorld
  * \param rgba8 Line color as 0xRRGGBBAA.
  */
 void miso_render_submit_world_lines(const MisoEngine *engine,
-                                    const float *vertices_xyz,
+                                    const float *restrict vertices_xyz,
                                     int vertex_count,
                                     uint32_t rgba8);
 

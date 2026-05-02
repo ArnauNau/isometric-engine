@@ -223,7 +223,7 @@ void miso_render_set_water_params(
 
 void miso_render_submit_sprites(const MisoEngine *engine,
                                 const MisoTextureHandle texture,
-                                const MisoSpriteInstance *instances,
+                                const MisoSpriteInstance *restrict instances,
                                 const int count) {
     (void)engine;
 
@@ -236,7 +236,7 @@ void miso_render_submit_sprites(const MisoEngine *engine,
 }
 
 void miso_render_submit_world_geometry(const MisoEngine *const engine,
-                                       const MisoWorldVertex *const vertices,
+                                       const MisoWorldVertex *const restrict vertices,
                                        const int count) {
     (void)engine;
 
@@ -260,7 +260,7 @@ void miso_render_submit_world_geometry(const MisoEngine *const engine,
 }
 
 void miso_render_submit_world_lines(const MisoEngine *const engine,
-                                    const float *const vertices_xyz,
+                                    const float *const restrict vertices_xyz,
                                     const int vertex_count,
                                     const uint32_t rgba8) {
     (void)engine;

@@ -56,7 +56,7 @@ bool miso_world_is_tile_free(const MisoWorld *world, int tx, int ty);
  * \param occupied Occupancy value to store.
  * \return true if the tile was in bounds and updated; false otherwise.
  */
-bool miso_world_set_tile_occupied(const MisoWorld *world, int tx, int ty, bool occupied);
+bool miso_world_set_tile_occupied(MisoWorld *world, int tx, int ty, bool occupied);
 
 /**
  * Converts a screen pixel coordinate through a camera into a world tile.

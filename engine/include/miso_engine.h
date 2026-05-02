@@ -195,13 +195,14 @@ void miso_end_frame(MisoEngine *engine);
 /**
  * Queries the current SDL drawable size in pixels.
  *
- * Output pointers are left untouched if any required argument is invalid.
+ * Output pointers are left untouched if any required argument is invalid. The
+ * output pointers must not alias each other.
  *
  * \param engine Engine instance.
  * \param out_width Receives drawable width in pixels.
  * \param out_height Receives drawable height in pixels.
  */
-void miso_get_window_size_pixels(const MisoEngine *engine, int *out_width, int *out_height);
+void miso_get_window_size_pixels(const MisoEngine *engine, int *restrict out_width, int *restrict out_height);
 
 /**
  * Returns the SDL window pixel density.

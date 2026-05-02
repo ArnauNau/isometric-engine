@@ -5,8 +5,8 @@
 void miso_iso_tile_to_world(const MisoIsoMapDesc *const desc,
                             const int tile_x,
                             const int tile_y,
-                            float *const out_world_x,
-                            float *const out_world_y) {
+                            float *const restrict out_world_x,
+                            float *const restrict out_world_y) {
     if (!desc || !out_world_x || !out_world_y) {
         return;
     }
@@ -43,8 +43,8 @@ MisoIsoTileCoordF miso_iso_world_to_tile_f(const MisoIsoMapDesc *const desc, con
 void miso_iso_world_to_tile_floor(const MisoIsoMapDesc *const desc,
                                   const float world_x,
                                   const float world_y,
-                                  int *const out_tile_x,
-                                  int *const out_tile_y) {
+                                  int *const restrict out_tile_x,
+                                  int *const restrict out_tile_y) {
     if (!desc || !out_tile_x || !out_tile_y) {
         return;
     }

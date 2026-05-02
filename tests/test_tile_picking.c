@@ -261,7 +261,7 @@ static int run_normalized_viewport_case(void) {
     }
 
     miso_camera_set_viewport_normalized(&engine, camera_id, 0.0f, 0.0f, 1.0f, 1.0f);
-    MisoCameraState *camera = miso__camera_get(&engine, camera_id);
+    MisoCameraState *camera = miso__camera_get_mut(&engine, camera_id);
     if (!camera || camera->viewport.x != 0 || camera->viewport.y != 0 || camera->viewport.w != 1920 ||
         camera->viewport.h != 1080) {
         SDL_free(engine.cameras);
@@ -269,7 +269,7 @@ static int run_normalized_viewport_case(void) {
     }
 
     miso_camera_set_viewport_normalized(&engine, camera_id, 0.5f, 0.0f, 0.5f, 1.0f);
-    camera = miso__camera_get(&engine, camera_id);
+    camera = miso__camera_get_mut(&engine, camera_id);
     if (!camera || camera->viewport.x != 960 || camera->viewport.y != 0 || camera->viewport.w != 960 ||
         camera->viewport.h != 1080) {
         SDL_free(engine.cameras);
@@ -277,7 +277,7 @@ static int run_normalized_viewport_case(void) {
     }
 
     miso__camera_resolve_normalized_viewports(&engine, 1280, 720);
-    camera = miso__camera_get(&engine, camera_id);
+    camera = miso__camera_get_mut(&engine, camera_id);
     if (!camera || camera->viewport.x != 640 || camera->viewport.y != 0 || camera->viewport.w != 640 ||
         camera->viewport.h != 720) {
         SDL_free(engine.cameras);
@@ -286,7 +286,7 @@ static int run_normalized_viewport_case(void) {
 
     miso_camera_set_viewport(&engine, camera_id, 10, 20, 300, 200);
     miso__camera_resolve_normalized_viewports(&engine, 640, 360);
-    camera = miso__camera_get(&engine, camera_id);
+    camera = miso__camera_get_mut(&engine, camera_id);
     if (!camera || camera->viewport.x != 10 || camera->viewport.y != 20 || camera->viewport.w != 300 ||
         camera->viewport.h != 200) {
         SDL_free(engine.cameras);

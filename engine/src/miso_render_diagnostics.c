@@ -109,7 +109,7 @@ void miso_render_diag_submit_ui_texture_debug(const MisoEngine *const engine,
 
 void miso_render_diag_submit_native_sprites(const MisoEngine *const engine,
                                             void *const native_texture,
-                                            const MisoSpriteInstance *const instances,
+                                            const MisoSpriteInstance *const restrict instances,
                                             const int count) {
     (void)engine;
     if (!native_texture || !instances || count <= 0) {

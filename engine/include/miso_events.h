@@ -1,7 +1,6 @@
 #ifndef MISO_EVENTS_H
 #define MISO_EVENTS_H
 
-
 typedef enum MisoEventType {
     MISO_EVENT_NONE = 0,
     MISO_EVENT_QUIT,

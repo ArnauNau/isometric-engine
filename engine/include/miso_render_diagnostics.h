@@ -217,7 +217,8 @@ void miso_render_diag_submit_ui_texture_handle_debug(
  *
  * This bypasses MisoTextureHandle lookup and is intended for diagnostics or
  * renderer integration experiments. NULL textures, NULL instances, and
- * non-positive counts are ignored.
+ * non-positive counts are ignored. The instance array must not alias
+ * renderer-owned upload storage.
  *
  * \param engine Engine whose renderer is active.
  * \param native_texture Backend texture pointer.
@@ -226,7 +227,7 @@ void miso_render_diag_submit_ui_texture_handle_debug(
  */
 void miso_render_diag_submit_native_sprites(const MisoEngine *engine,
                                             void *native_texture,
-                                            const MisoSpriteInstance *instances,
+                                            const MisoSpriteInstance *restrict instances,
                                             int count);
 
 #endif

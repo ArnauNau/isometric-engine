@@ -189,7 +189,7 @@ void miso_profiler_shutdown(MisoEngine *const engine) {
     engine->profiler = nullptr;
 }
 
-void miso_profiler_frame_start(MisoEngine *const engine) {
+void miso_profiler_frame_start(const MisoEngine *const engine) {
     MisoProfilerState *const profiler = engine ? engine->profiler : nullptr;
     if (!profiler) {
         return;
@@ -201,7 +201,7 @@ void miso_profiler_frame_start(MisoEngine *const engine) {
     miso_profiler_begin(engine, MISO_PROFILER_ENGINE_FRAME_TOTAL);
 }
 
-void miso_profiler_frame_end(MisoEngine *const engine) {
+void miso_profiler_frame_end(const MisoEngine *const engine) {
     MisoProfilerState *const profiler = engine ? engine->profiler : nullptr;
     if (!profiler) {
         return;
@@ -211,7 +211,7 @@ void miso_profiler_frame_end(MisoEngine *const engine) {
     miso__profiler_calculate_fps(profiler);
 }
 
-void miso_profiler_begin(MisoEngine *const engine, const MisoProfilerCategoryId category) {
+void miso_profiler_begin(const MisoEngine *const engine, const MisoProfilerCategoryId category) {
     MisoProfilerState *const profiler = engine ? engine->profiler : nullptr;
     if (!miso__profiler_valid_category(profiler, category)) {
         return;
@@ -219,7 +219,7 @@ void miso_profiler_begin(MisoEngine *const engine, const MisoProfilerCategoryId 
     profiler->measuring[category].start_time = SDL_GetPerformanceCounter();
 }
 
-void miso_profiler_end(MisoEngine *const engine, const MisoProfilerCategoryId category) {
+void miso_profiler_end(const MisoEngine *const engine, const MisoProfilerCategoryId category) {
     MisoProfilerState *const profiler = engine ? engine->profiler : nullptr;
     if (!miso__profiler_valid_category(profiler, category) || profiler->measuring[category].start_time == 0U) {
         return;
@@ -230,7 +230,7 @@ void miso_profiler_end(MisoEngine *const engine, const MisoProfilerCategoryId ca
     profiler->measuring[category].start_time = 0U;
 }
 
-void miso_profiler_set_duration(MisoEngine *const engine,
+void miso_profiler_set_duration(const MisoEngine *const engine,
                                 const MisoProfilerCategoryId category,
                                 const float duration_ms) {
     MisoProfilerState *const profiler = engine ? engine->profiler : nullptr;
@@ -241,7 +241,7 @@ void miso_profiler_set_duration(MisoEngine *const engine,
     profiler->measuring[category].duration_ms = duration_ms > 0.0f ? duration_ms : 0.0f;
 }
 
-bool miso_profiler_register_game_category(MisoEngine *const engine,
+bool miso_profiler_register_game_category(const MisoEngine *const engine,
                                           const char *const name,
                                           const uint32_t rgba8,
                                           MisoProfilerCategoryId *const out_category) {
@@ -249,7 +249,7 @@ bool miso_profiler_register_game_category(MisoEngine *const engine,
         engine, MISO_PROFILER_ENGINE_FRAME_TOTAL, name, rgba8, out_category);
 }
 
-bool miso_profiler_register_game_category_child(MisoEngine *const engine,
+bool miso_profiler_register_game_category_child(const MisoEngine *const engine,
                                                 const MisoProfilerCategoryId parent,
                                                 const char *const name,
                                                 const uint32_t rgba8,
@@ -319,9 +319,9 @@ uint32_t miso_profiler_get_category_color(const MisoEngine *const engine, const 
 }
 
 void miso_profiler_get_fps(const MisoEngine *const engine,
-                           float *const out_min,
-                           float *const out_avg,
-                           float *const out_max) {
+                           float *const restrict out_min,
+                           float *const restrict out_avg,
+                           float *const restrict out_max) {
     const MisoProfilerState *const profiler = engine ? engine->profiler : nullptr;
     if (!profiler) {
         if (out_min) {
@@ -356,7 +356,7 @@ float miso_profiler_get_last_frame_time_ms(const MisoEngine *const engine) {
     return measured_total > 0.0f ? measured_total : profiler->history.total_times[frame];
 }
 
-void miso_profiler_overlay_init(MisoEngine *const engine, const MisoFontHandle font) {
+void miso_profiler_overlay_init(const MisoEngine *const engine, const MisoFontHandle font) {
     MisoProfilerState *const profiler = engine ? engine->profiler : nullptr;
     if (!profiler || font == 0) {
         return;
@@ -379,7 +379,7 @@ void miso_profiler_overlay_init(MisoEngine *const engine, const MisoFontHandle f
     }
 }
 
-void miso_profiler_overlay_shutdown(MisoEngine *const engine) {
+void miso_profiler_overlay_shutdown(const MisoEngine *const engine) {
     MisoProfilerState *const profiler = engine ? engine->profiler : nullptr;
     if (!profiler) {
         return;
@@ -394,7 +394,7 @@ void miso_profiler_overlay_shutdown(MisoEngine *const engine) {
     }
 }
 
-void miso_profiler_overlay_render(MisoEngine *const engine, const SDL_FPoint position) {
+void miso_profiler_overlay_render(const MisoEngine *const engine, const SDL_FPoint position) {
     MisoProfilerState *const profiler = engine ? engine->profiler : nullptr;
     if (!profiler || profiler->history.count <= 0 || !miso_text_is_valid(engine, profiler->overlay_title_text)) {
         return;
@@ -402,8 +402,8 @@ void miso_profiler_overlay_render(MisoEngine *const engine, const SDL_FPoint pos
 
     const int frame = profiler->history.newest;
     char text[64] = {0};
-    const float line_height = 24.0f;
-    const float square_size = line_height - 4.0f;
+    constexpr float line_height = 24.0f;
+    constexpr float square_size = line_height - 4.0f;
     const float text_x = position.x + square_size * 1.5f;
     float y = position.y;
 

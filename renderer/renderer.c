@@ -1529,7 +1529,7 @@ void Renderer_DrawLine(const float x1,
     Renderer_DrawLineBatch(vertices, 2, color);
 }
 
-void Renderer_DrawLineBatch(const float *const vertices_xyz, const int vertex_count, const SDL_FColor color) {
+void Renderer_DrawLineBatch(const float *const restrict vertices_xyz, const int vertex_count, const SDL_FColor color) {
     if (!vertices_xyz || vertex_count < 2 || (vertex_count & 1) != 0 || !cmd_buffer || !swapchain_texture ||
         frame_queues_flushed || line_cmd_count >= RENDERER_MAX_LINE_CMDS) {
         return;
@@ -1551,7 +1551,7 @@ void Renderer_DrawLineBatch(const float *const vertices_xyz, const int vertex_co
     g_frame_stats.line_vertices_submitted += (Uint32)vertex_count;
 }
 
-void Renderer_DrawGeometry(const SDL_Vertex *const vertices, const int count) {
+void Renderer_DrawGeometry(const SDL_Vertex *const restrict vertices, const int count) {
     if (!vertices || count <= 0 || !cmd_buffer || !swapchain_texture || frame_queues_flushed) {
         return;
     }
@@ -1638,7 +1638,7 @@ void Renderer_DrawText(TTF_Text *text, const float x, const float y) {
     g_frame_stats.queues[RENDERER_STATS_QUEUE_UI_TEXT].cmd_count = ui_text_cmd_count;
 }
 
-void Renderer_FlushUIGeometry(const SDL_Vertex *vertices, const int count) {
+void Renderer_FlushUIGeometry(const SDL_Vertex *restrict vertices, const int count) {
     if (!vertices || count <= 0 || !cmd_buffer || !swapchain_texture || frame_queues_flushed) {
         return;
     }

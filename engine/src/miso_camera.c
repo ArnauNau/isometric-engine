@@ -41,8 +41,9 @@ void miso__camera_resolve_normalized_viewports(MisoEngine *const engine,
     }
 }
 
-void miso_camera_set_viewport(MisoEngine *engine, MisoCameraId camera_id, int x, int y, int width, int height) {
-    MisoCameraState *camera = miso__camera_get(engine, camera_id);
+void miso_camera_set_viewport(
+    MisoEngine *const engine, const MisoCameraId camera_id, const int x, const int y, int width, int height) {
+    MisoCameraState *const camera = miso__camera_get_mut(engine, camera_id);
     if (!camera) {
         return;
     }
@@ -59,9 +60,13 @@ void miso_camera_set_viewport(MisoEngine *engine, MisoCameraId camera_id, int x,
     camera->viewport.h = height;
 }
 
-void miso_camera_set_viewport_normalized(
-    MisoEngine *engine, MisoCameraId camera_id, float x, float y, float width, float height) {
-    MisoCameraState *camera = miso__camera_get(engine, camera_id);
+void miso_camera_set_viewport_normalized(MisoEngine *engine,
+                                         const MisoCameraId camera_id,
+                                         const float x,
+                                         const float y,
+                                         const float width,
+                                         const float height) {
+    MisoCameraState *const camera = miso__camera_get_mut(engine, camera_id);
     if (!camera) {
         return;
     }
@@ -74,7 +79,7 @@ void miso_camera_set_viewport_normalized(
 }
 
 void miso_camera_set_position(MisoEngine *engine, MisoCameraId camera_id, float x, float y) {
-    MisoCameraState *camera = miso__camera_get(engine, camera_id);
+    MisoCameraState *camera = miso__camera_get_mut(engine, camera_id);
     if (!camera) {
         return;
     }
@@ -83,7 +88,7 @@ void miso_camera_set_position(MisoEngine *engine, MisoCameraId camera_id, float 
 }
 
 void miso_camera_set_zoom(MisoEngine *engine, MisoCameraId camera_id, float zoom) {
-    MisoCameraState *camera = miso__camera_get(engine, camera_id);
+    MisoCameraState *camera = miso__camera_get_mut(engine, camera_id);
     if (!camera) {
         return;
     }
@@ -97,7 +102,7 @@ void miso_camera_set_zoom(MisoEngine *engine, MisoCameraId camera_id, float zoom
 }
 
 void miso_camera_pan(MisoEngine *engine, MisoCameraId camera_id, float dx_world, float dy_world) {
-    MisoCameraState *camera = miso__camera_get(engine, camera_id);
+    MisoCameraState *camera = miso__camera_get_mut(engine, camera_id);
     if (!camera) {
         return;
     }
@@ -105,8 +110,9 @@ void miso_camera_pan(MisoEngine *engine, MisoCameraId camera_id, float dx_world,
     camera->y += dy_world;
 }
 
-void miso_camera_zoom_at_screen(MisoEngine *engine, MisoCameraId camera_id, float wheel_delta, float sx, float sy) {
-    MisoCameraState *camera = miso__camera_get(engine, camera_id);
+void miso_camera_zoom_at_screen(
+    MisoEngine *const engine, const MisoCameraId camera_id, const float wheel_delta, const float sx, const float sy) {
+    MisoCameraState *const camera = miso__camera_get_mut(engine, camera_id);
     if (!camera) {
         return;
     }
@@ -132,24 +138,25 @@ void miso_camera_zoom_at_screen(MisoEngine *engine, MisoCameraId camera_id, floa
     camera->y = world_y - (sy - cy) / camera->zoom;
 }
 
-MisoVec2 miso_camera_get_position(const MisoEngine *engine, MisoCameraId camera_id) {
-    const MisoCameraState *camera = miso__camera_get_const(engine, camera_id);
+MisoVec2 miso_camera_get_position(const MisoEngine *const engine, const MisoCameraId camera_id) {
+    const MisoCameraState *const camera = miso__camera_get(engine, camera_id);
     if (!camera) {
         return (MisoVec2){0.0f, 0.0f};
     }
     return (MisoVec2){camera->x, camera->y};
 }
 
-float miso_camera_get_zoom(const MisoEngine *engine, MisoCameraId camera_id) {
-    const MisoCameraState *camera = miso__camera_get_const(engine, camera_id);
+float miso_camera_get_zoom(const MisoEngine *const engine, const MisoCameraId camera_id) {
+    const MisoCameraState *const camera = miso__camera_get(engine, camera_id);
     if (!camera) {
         return 1.0f;
     }
     return camera->zoom;
 }
 
-MisoVec2 miso_camera_screen_to_world(const MisoEngine *engine, MisoCameraId camera_id, int sx, int sy) {
-    const MisoCameraState *camera = miso__camera_get_const(engine, camera_id);
+MisoVec2
+miso_camera_screen_to_world(const MisoEngine *const engine, const MisoCameraId camera_id, const int sx, const int sy) {
+    const MisoCameraState *const camera = miso__camera_get(engine, camera_id);
     if (!camera) {
         return (MisoVec2){0.0f, 0.0f};
     }
@@ -163,8 +170,9 @@ MisoVec2 miso_camera_screen_to_world(const MisoEngine *engine, MisoCameraId came
     return (MisoVec2){world_x, world_y};
 }
 
-MisoVec2 miso_camera_world_to_screen(const MisoEngine *engine, MisoCameraId camera_id, float wx, float wy) {
-    const MisoCameraState *camera = miso__camera_get_const(engine, camera_id);
+MisoVec2
+miso_camera_world_to_screen(const MisoEngine *engine, const MisoCameraId camera_id, const float wx, const float wy) {
+    const MisoCameraState *camera = miso__camera_get(engine, camera_id);
     if (!camera) {
         return (MisoVec2){0.0f, 0.0f};
     }

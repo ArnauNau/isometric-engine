@@ -56,7 +56,7 @@ bool miso_world_is_tile_free(const MisoWorld *const world, const int tx, const i
     return !world->occupied[miso__tile_index(world, tx, ty)];
 }
 
-bool miso_world_set_tile_occupied(const MisoWorld *const world, const int tx, const int ty, const bool occupied) {
+bool miso_world_set_tile_occupied(MisoWorld *const world, const int tx, const int ty, const bool occupied) {
     if (!miso__in_bounds(world, tx, ty)) {
         return false;
     }

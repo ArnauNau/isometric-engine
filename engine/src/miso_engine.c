@@ -85,7 +85,7 @@ static void miso__log_library_versions(void) {
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "miso version: " MISO_VERSION);
 }
 
-static bool miso__ensure_camera_capacity(MisoEngine *engine) {
+static bool miso__ensure_camera_capacity(MisoEngine *const engine) {
     if (engine->camera_count < engine->camera_capacity) {
         return true;
     }
@@ -112,7 +112,7 @@ static void miso__sanitize_window_pixels(int *const inout_width, int *const inou
     }
 }
 
-void miso__engine_apply_resize_if_needed(MisoEngine *engine, int pixel_width, int pixel_height) {
+void miso__engine_apply_resize_if_needed(MisoEngine *const engine, int pixel_width, int pixel_height) {
     if (!engine) {
         return;
     }
@@ -132,7 +132,7 @@ void miso__engine_apply_resize_if_needed(MisoEngine *engine, int pixel_width, in
     miso__renderer_resize(pixel_width, pixel_height);
 }
 
-bool miso__engine_should_dispatch_resize_event(MisoEngine *engine, int pixel_width, int pixel_height) {
+bool miso__engine_should_dispatch_resize_event(MisoEngine *const engine, int pixel_width, int pixel_height) {
     if (!engine) {
         return false;
     }
@@ -149,7 +149,7 @@ bool miso__engine_should_dispatch_resize_event(MisoEngine *engine, int pixel_wid
     return true;
 }
 
-static void miso__render_registered_game(MisoEngine *const engine) {
+static void miso__render_registered_game(const MisoEngine *const engine) {
     if (engine->game_registered && engine->game_hooks.on_render_world) {
         miso_profiler_begin(engine, MISO_PROFILER_ENGINE_RENDER_WORLD);
         engine->game_hooks.on_render_world(engine->game_ctx, engine);
@@ -167,7 +167,7 @@ static void miso__render_registered_game(MisoEngine *const engine) {
     }
 }
 
-static void miso__render_registered_game_world_only(MisoEngine *const engine) {
+static void miso__render_registered_game_world_only(const MisoEngine *const engine) {
     if (engine->game_registered && engine->game_hooks.on_render_world) {
         miso_profiler_begin(engine, MISO_PROFILER_ENGINE_RENDER_WORLD);
         engine->game_hooks.on_render_world(engine->game_ctx, engine);
@@ -228,7 +228,7 @@ static void miso__render_immediate_if_possible(MisoEngine *const engine) {
 }
 
 static bool SDLCALL miso__live_resize_event_watch(void *const userdata, SDL_Event *const event) {
-    MisoEngine *engine = (MisoEngine *)userdata;
+    MisoEngine *const engine = (MisoEngine *)userdata;
     if (!engine || !engine->running) {
         return true;
     }
@@ -260,7 +260,7 @@ static bool SDLCALL miso__live_resize_event_watch(void *const userdata, SDL_Even
     return true;
 }
 
-MisoResult miso_create(const MisoConfig *cfg, MisoEngine **out_engine) {
+MisoResult miso_create(const MisoConfig *const cfg, MisoEngine **const out_engine) {
     if (!out_engine) {
         return MISO_ERR_INVALID_ARG;
     }
@@ -359,7 +359,7 @@ MisoResult miso_create(const MisoConfig *cfg, MisoEngine **out_engine) {
     return MISO_OK;
 }
 
-void miso_destroy(MisoEngine *engine) {
+void miso_destroy(MisoEngine *const engine) {
     if (!engine) {
         return;
     }
@@ -429,21 +429,23 @@ void miso_end_frame(MisoEngine *const engine) {
     miso_profiler_frame_end(engine);
 }
 
-void miso_get_window_size_pixels(const MisoEngine *const engine, int *const out_width, int *const out_height) {
+void miso_get_window_size_pixels(const MisoEngine *const engine,
+                                 int *const restrict out_width,
+                                 int *const restrict out_height) {
     if (!engine || !engine->window || !out_width || !out_height) {
         return;
     }
     SDL_GetWindowSizeInPixels(engine->window, out_width, out_height);
 }
 
-float miso_get_window_pixel_density(const MisoEngine *engine) {
+float miso_get_window_pixel_density(const MisoEngine *const engine) {
     if (!engine || !engine->window) {
         return 1.0f;
     }
     return SDL_GetWindowPixelDensity(engine->window);
 }
 
-void miso_run_simulation_ticks(MisoEngine *engine, const MisoSimTickFn tick_fn, void *user) {
+void miso_run_simulation_ticks(MisoEngine *const engine, const MisoSimTickFn tick_fn, void *const user) {
     if (!engine || !engine->running) {
         return;
     }
@@ -471,14 +473,14 @@ void miso_run_simulation_ticks(MisoEngine *engine, const MisoSimTickFn tick_fn, 
     miso_profiler_end(engine, MISO_PROFILER_ENGINE_FIXED_TICKS);
 }
 
-float miso_get_real_delta_seconds(const MisoEngine *engine) {
+float miso_get_real_delta_seconds(const MisoEngine *const engine) {
     if (!engine) {
         return 0.0f;
     }
     return engine->real_dt_seconds;
 }
 
-float miso_get_interpolation_alpha(const MisoEngine *engine) {
+float miso_get_interpolation_alpha(const MisoEngine *const engine) {
     if (!engine || engine->config.sim_tick_hz <= 0) {
         return 0.0f;
     }
@@ -487,7 +489,7 @@ float miso_get_interpolation_alpha(const MisoEngine *engine) {
     return (float)(engine->sim_accumulator / fixed_step);
 }
 
-MisoResult miso_game_register(MisoEngine *engine, const MisoGameHooks *hooks, void *game_ctx) {
+MisoResult miso_game_register(MisoEngine *const engine, const MisoGameHooks *const hooks, void *const game_ctx) {
     if (!engine || !hooks) {
         return MISO_ERR_INVALID_ARG;
     }
@@ -510,7 +512,7 @@ void miso__engine_request_quit(MisoEngine *engine) {
     engine->running = false;
 }
 
-MisoCameraState *miso__camera_get(MisoEngine *engine, const MisoCameraId id) {
+MisoCameraState *miso__camera_get_mut(MisoEngine *const engine, const MisoCameraId id) {
     if (!engine || id == 0) {
         return nullptr;
     }
@@ -522,7 +524,7 @@ MisoCameraState *miso__camera_get(MisoEngine *engine, const MisoCameraId id) {
     return camera->used ? camera : nullptr;
 }
 
-const MisoCameraState *miso__camera_get_const(const MisoEngine *engine, const MisoCameraId id) {
+const MisoCameraState *miso__camera_get(const MisoEngine *const engine, const MisoCameraId id) {
     if (!engine || id == 0) {
         return nullptr;
     }
@@ -530,11 +532,11 @@ const MisoCameraState *miso__camera_get_const(const MisoEngine *engine, const Mi
     if (idx >= engine->camera_count) {
         return nullptr;
     }
-    const MisoCameraState *camera = &engine->cameras[idx];
+    const MisoCameraState *const camera = &engine->cameras[idx];
     return camera->used ? camera : nullptr;
 }
 
-MisoCameraId miso_camera_create(MisoEngine *engine) {
+MisoCameraId miso_camera_create(MisoEngine *const engine) {
     if (!engine) {
         return 0;
     }
@@ -562,7 +564,7 @@ MisoCameraId miso_camera_create(MisoEngine *engine) {
 
 void miso__camera_get_view_projection(const MisoEngine *const engine, const MisoCameraId id, float out_matrix[16]) {
     SDL_memset(out_matrix, 0, sizeof(float) * 16U);
-    const MisoCameraState *camera = miso__camera_get_const(engine, id);
+    const MisoCameraState *camera = miso__camera_get(engine, id);
     if (!camera) {
         out_matrix[0] = 1.0f;
         out_matrix[5] = 1.0f;

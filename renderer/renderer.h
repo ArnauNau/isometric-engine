@@ -188,7 +188,8 @@ void Renderer_SetWaterParams(float time, float speed, float amplitude, float pha
  * All sprites must use the same texture.
  *
  * @param texture   The texture atlas containing all sprite images.
- * @param instances Array of sprite instance data.
+ * @param instances Array of sprite instance data; must not alias renderer-owned
+ *                  upload storage.
  * @param count     Number of sprites to draw.
  *
  * @pre Renderer_BeginFrame() has been called.
@@ -199,8 +200,10 @@ void Renderer_DrawSprites(SDL_GPUTexture *texture, const SpriteInstance *instanc
 // Update the camera/view projection
 void Renderer_DrawLine(float x1, float y1, float z1, float x2, float y2, float z2, SDL_FColor color);
 // Draw a batched line list. `vertex_count` must be even (2 vertices per segment).
-void Renderer_DrawLineBatch(const float *vertices_xyz, int vertex_count, SDL_FColor color);
-void Renderer_DrawGeometry(const SDL_Vertex *vertices, int count);
+// The vertex array must not alias renderer-owned upload storage.
+void Renderer_DrawLineBatch(const float *restrict vertices_xyz, int vertex_count, SDL_FColor color);
+// The vertex array must not alias renderer-owned upload storage.
+void Renderer_DrawGeometry(const SDL_Vertex *restrict vertices, int count);
 
 TTF_TextEngine *Renderer_GetTextEngine(void);
 [[deprecated("Use Renderer_UI_DrawText instead.")]]
@@ -223,15 +226,17 @@ typedef struct {
     int index_count;
 } UITextAtlasInfo;
 
-// Flush screen-space geometry (single draw call)
-void Renderer_FlushUIGeometry(const SDL_Vertex *vertices, int count);
+// Flush screen-space geometry (single draw call). The vertex array must not
+// alias renderer-owned upload storage.
+void Renderer_FlushUIGeometry(const SDL_Vertex *restrict vertices, int count);
 
-// Flush screen-space text (one draw call per atlas)
-void Renderer_FlushUIText(const float *vertices,
+// Flush screen-space text (one draw call per atlas). Input arrays must not
+// alias each other or renderer-owned upload storage.
+void Renderer_FlushUIText(const float *restrict vertices,
                           int vertex_count,
-                          const int *indices,
+                          const int *restrict indices,
                           int index_count,
-                          const UITextAtlasInfo *atlases,
+                          const UITextAtlasInfo *restrict atlases,
                           int atlas_count);
 
 /* ------------------ DEBUG UTILITIES ------------------ */

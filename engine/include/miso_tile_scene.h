@@ -238,10 +238,21 @@ MisoResult miso_tile_scene_set_object_visual(MisoTileScene *scene, const MisoTil
  */
 void miso_tile_scene_render_objects(const MisoEngine *engine, MisoTileScene *scene, MisoCameraId camera_id);
 
+/**
+ * Converts fractional tile coordinates to world coordinates.
+ *
+ * The output pointers must not alias each other.
+ */
 bool miso_tile_scene_tile_to_world(
-    const MisoTileScene *scene, float tile_x, float tile_y, float *out_world_x, float *out_world_y);
+    const MisoTileScene *scene, float tile_x, float tile_y, float *restrict out_world_x, float *restrict out_world_y);
+
+/**
+ * Converts world coordinates to fractional tile coordinates.
+ *
+ * The output pointers must not alias each other.
+ */
 bool miso_tile_scene_world_to_tile(
-    const MisoTileScene *scene, float world_x, float world_y, float *out_tile_x, float *out_tile_y);
+    const MisoTileScene *scene, float world_x, float world_y, float *restrict out_tile_x, float *restrict out_tile_y);
 float miso_tile_scene_depth_at_tile(const MisoTileScene *scene, float tile_x, float tile_y);
 
 /**

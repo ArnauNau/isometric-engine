@@ -770,8 +770,8 @@ void miso_tile_scene_render_objects(const MisoEngine *const engine,
 bool miso_tile_scene_tile_to_world(const MisoTileScene *const scene,
                                    const float tile_x,
                                    const float tile_y,
-                                   float *const out_world_x,
-                                   float *const out_world_y) {
+                                   float *const restrict out_world_x,
+                                   float *const restrict out_world_y) {
     if (!scene || !out_world_x || !out_world_y) {
         return false;
     }
@@ -788,8 +788,8 @@ bool miso_tile_scene_tile_to_world(const MisoTileScene *const scene,
 bool miso_tile_scene_world_to_tile(const MisoTileScene *const scene,
                                    const float world_x,
                                    const float world_y,
-                                   float *const out_tile_x,
-                                   float *const out_tile_y) {
+                                   float *const restrict out_tile_x,
+                                   float *const restrict out_tile_y) {
     if (!scene || !out_tile_x || !out_tile_y) {
         return false;
     }

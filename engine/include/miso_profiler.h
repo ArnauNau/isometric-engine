@@ -6,12 +6,12 @@
 
 #define MISO_PROFILER_HISTORY_COUNT 240
 #define MISO_PROFILER_CATEGORY_MAX 64
-#define MISO_PROFILER_CATEGORY_NAME_MAX 48
+#define MISO_PROFILER_CATEGORY_NAME_MAX 53
 #define MISO_PROFILER_CATEGORY_NONE UINT16_MAX
 
 typedef uint16_t MisoProfilerCategoryId;
 
-typedef enum MisoProfilerLayer { MISO_PROFILER_LAYER_ENGINE = 0, MISO_PROFILER_LAYER_GAME } MisoProfilerLayer;
+typedef enum MisoProfilerLayer : uint8_t { MISO_PROFILER_LAYER_ENGINE = 0, MISO_PROFILER_LAYER_GAME } MisoProfilerLayer;
 
 typedef enum MisoProfilerEngineCategory {
     MISO_PROFILER_ENGINE_EVENTS = 0,
@@ -28,10 +28,10 @@ typedef enum MisoProfilerEngineCategory {
 } MisoProfilerEngineCategory;
 
 typedef struct MisoProfilerCategoryInfo {
+    char name[MISO_PROFILER_CATEGORY_NAME_MAX];
     bool active;
     MisoProfilerLayer layer;
     MisoProfilerCategoryId parent;
-    char name[MISO_PROFILER_CATEGORY_NAME_MAX];
     uint32_t rgba8;
 } MisoProfilerCategoryInfo;
 
@@ -80,7 +80,7 @@ void miso_profiler_shutdown(MisoEngine *engine);
  *
  * \param engine Engine whose profiler should start a frame.
  */
-void miso_profiler_frame_start(MisoEngine *engine);
+void miso_profiler_frame_start(const MisoEngine *engine);
 
 /**
  * Ends frame total measurement and stores the frame in the rolling history.
@@ -90,7 +90,7 @@ void miso_profiler_frame_start(MisoEngine *engine);
  *
  * \param engine Engine whose profiler should end a frame.
  */
-void miso_profiler_frame_end(MisoEngine *engine);
+void miso_profiler_frame_end(const MisoEngine *engine);
 
 /**
  * Begins measuring a profiler category.
@@ -101,7 +101,7 @@ void miso_profiler_frame_end(MisoEngine *engine);
  * \param engine Engine whose profiler is active.
  * \param category Category id to begin measuring.
  */
-void miso_profiler_begin(MisoEngine *engine, MisoProfilerCategoryId category);
+void miso_profiler_begin(const MisoEngine *engine, MisoProfilerCategoryId category);
 
 /**
  * Ends measuring a profiler category and accumulates elapsed milliseconds.
@@ -112,7 +112,7 @@ void miso_profiler_begin(MisoEngine *engine, MisoProfilerCategoryId category);
  * \param engine Engine whose profiler is active.
  * \param category Category id to end measuring.
  */
-void miso_profiler_end(MisoEngine *engine, MisoProfilerCategoryId category);
+void miso_profiler_end(const MisoEngine *engine, MisoProfilerCategoryId category);
 
 /**
  * Sets a category duration explicitly for the current frame.
@@ -124,7 +124,7 @@ void miso_profiler_end(MisoEngine *engine, MisoProfilerCategoryId category);
  * \param category Category id to update.
  * \param duration_ms Duration in milliseconds.
  */
-void miso_profiler_set_duration(MisoEngine *engine, MisoProfilerCategoryId category, float duration_ms);
+void miso_profiler_set_duration(const MisoEngine *engine, MisoProfilerCategoryId category, float duration_ms);
 
 /**
  * Registers a game profiler category under the frame-total root.
@@ -139,7 +139,7 @@ void miso_profiler_set_duration(MisoEngine *engine, MisoProfilerCategoryId categ
  * \param out_category Receives the new category id.
  * \return true if the category was registered.
  */
-bool miso_profiler_register_game_category(MisoEngine *engine,
+bool miso_profiler_register_game_category(const MisoEngine *engine,
                                           const char *name,
                                           uint32_t rgba8,
                                           MisoProfilerCategoryId *out_category);
@@ -158,7 +158,7 @@ bool miso_profiler_register_game_category(MisoEngine *engine,
  * \param out_category Receives the new category id.
  * \return true if the category was registered.
  */
-bool miso_profiler_register_game_category_child(MisoEngine *engine,
+bool miso_profiler_register_game_category_child(const MisoEngine *engine,
                                                 MisoProfilerCategoryId parent,
                                                 const char *name,
                                                 uint32_t rgba8,
@@ -201,15 +201,18 @@ uint32_t miso_profiler_get_category_color(const MisoEngine *engine, MisoProfiler
 /**
  * Copies rolling FPS statistics.
  *
- * Each output pointer is optional. Missing profiler state writes 0 to provided
- * outputs.
+ * Each output pointer is optional. Provided output pointers must not alias each
+ * other. Missing profiler state writes 0 to provided outputs.
  *
  * \param engine Engine whose profiler is active.
  * \param out_min Optional destination for minimum FPS.
  * \param out_avg Optional destination for average FPS.
  * \param out_max Optional destination for maximum FPS.
  */
-void miso_profiler_get_fps(const MisoEngine *engine, float *out_min, float *out_avg, float *out_max);
+void miso_profiler_get_fps(const MisoEngine *engine,
+                           float *restrict out_min,
+                           float *restrict out_avg,
+                           float *restrict out_max);
 
 /**
  * Returns the latest completed frame duration in milliseconds.
@@ -230,14 +233,14 @@ float miso_profiler_get_last_frame_time_ms(const MisoEngine *engine);
  * \param engine Engine whose profiler/text renderer is active.
  * \param font Font handle used by overlay labels.
  */
-void miso_profiler_overlay_init(MisoEngine *engine, MisoFontHandle font);
+void miso_profiler_overlay_init(const MisoEngine *engine, MisoFontHandle font);
 
 /**
  * Destroys text objects owned by the built-in profiler overlay.
  *
  * \param engine Engine whose profiler overlay should shut down.
  */
-void miso_profiler_overlay_shutdown(MisoEngine *engine);
+void miso_profiler_overlay_shutdown(const MisoEngine *engine);
 
 /**
  * Renders the built-in profiler overlay at a UI pixel position.
@@ -249,6 +252,6 @@ void miso_profiler_overlay_shutdown(MisoEngine *engine);
  * \param engine Engine whose profiler/text renderer is active.
  * \param position Top-left UI position for the overlay.
  */
-void miso_profiler_overlay_render(MisoEngine *engine, SDL_FPoint position);
+void miso_profiler_overlay_render(const MisoEngine *engine, SDL_FPoint position);
 
 #endif
