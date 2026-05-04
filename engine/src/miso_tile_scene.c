@@ -6,16 +6,16 @@
 #include <SDL3/SDL.h>
 
 typedef struct MisoTileObjectRecord {
+    uint64_t game_ref;
+    MisoTileFootprint footprint;
     MisoTileObjectId id;
     MisoTileObjectTypeId type_id;
-    int tile_x;
-    int tile_y;
-    MisoTileFootprint footprint;
     MisoTileVisualId visual_id;
-    uint8_t occupancy_mask;
+    uint32_t tile_x;
+    uint32_t tile_y;
+    MisoTileOccupancyMask occupancy_mask;
     bool pickable;
     bool active;
-    uint64_t game_ref;
 } MisoTileObjectRecord;
 
 typedef struct MisoTileObjectVisualRecord {
@@ -29,27 +29,28 @@ typedef struct MisoTileObjectVisualRecord {
 } MisoTileObjectVisualRecord;
 
 struct MisoTileScene {
-    MisoEngine *engine;
     MisoIsoMapDesc map;
-    uint8_t *occupancy;
-    MisoTileObjectRecord *objects;
     uint32_t object_count;
     uint32_t object_capacity;
-    MisoTileObjectId next_object_id;
-    MisoTileObjectVisualRecord *visuals;
     uint32_t visual_count;
     uint32_t visual_capacity;
-    MisoSpriteInstance *object_render_cache;
     uint32_t object_render_capacity;
+    MisoTileObjectId next_object_id;
+    MisoEngine *engine;
+    MisoTileOccupancyMask *occupancy;
+    MisoTileObjectRecord *objects;
+    MisoTileObjectVisualRecord *visuals;
+    MisoSpriteInstance *object_render_cache;
 };
 
 struct MisoTilemap {
-    MisoTileScene *scene;
     MisoTextureHandle texture;
     uint16_t atlas_columns;
     uint16_t atlas_rows;
+    uint32_t render_cache_count;
     float tint_overlay_strength;
     bool cache_dirty;
+    MisoTileScene *scene;
     uint32_t *tiles;
     uint32_t *flags;
     MisoSpriteInstance *render_cache;
@@ -128,8 +129,19 @@ static bool miso__tile_scene_in_bounds(const MisoTileScene *const scene, const i
     return scene && tx >= 0 && ty >= 0 && tx < scene->map.width_tiles && ty < scene->map.height_tiles;
 }
 
-static size_t miso__tile_scene_index(const MisoTileScene *const scene, const int tx, const int ty) {
+static inline size_t miso__tile_scene_index(const MisoTileScene *const scene, const int tx, const int ty) {
     return (size_t)ty * (size_t)scene->map.width_tiles + (size_t)tx;
+}
+
+static bool miso__tilemap_valid_tile_id(const MisoTilemap *const tilemap, const uint32_t tile_id) {
+    if (!tilemap) {
+        return false;
+    }
+    if (tile_id == MISO_TILE_EMPTY) {
+        return true;
+    }
+
+    return tile_id < (uint32_t)tilemap->atlas_columns * (uint32_t)tilemap->atlas_rows;
 }
 
 static bool miso__tile_footprint_valid(const MisoTileFootprint *const footprint) {
@@ -268,30 +280,95 @@ static bool miso__tile_scene_has_adjacent_flags(const MisoTileScene *const scene
     for (int x = min_x; x <= max_x; x++) {
         const int top_y = min_y - 1;
         const int bottom_y = max_y + 1;
-        if (miso__tile_scene_in_bounds(scene, x, top_y) &&
-            (tilemap->flags[miso__tile_scene_index(scene, x, top_y)] & required_flags) == required_flags) {
-            return true;
+        if (miso__tile_scene_in_bounds(scene, x, top_y)) {
+            const size_t idx = miso__tile_scene_index(scene, x, top_y);
+            if (tilemap->tiles[idx] != MISO_TILE_EMPTY && (tilemap->flags[idx] & required_flags) == required_flags) {
+                return true;
+            }
         }
-        if (miso__tile_scene_in_bounds(scene, x, bottom_y) &&
-            (tilemap->flags[miso__tile_scene_index(scene, x, bottom_y)] & required_flags) == required_flags) {
-            return true;
+        if (miso__tile_scene_in_bounds(scene, x, bottom_y)) {
+            const size_t idx = miso__tile_scene_index(scene, x, bottom_y);
+            if (tilemap->tiles[idx] != MISO_TILE_EMPTY && (tilemap->flags[idx] & required_flags) == required_flags) {
+                return true;
+            }
         }
     }
 
     for (int y = min_y; y <= max_y; y++) {
         const int left_x = min_x - 1;
         const int right_x = max_x + 1;
-        if (miso__tile_scene_in_bounds(scene, left_x, y) &&
-            (tilemap->flags[miso__tile_scene_index(scene, left_x, y)] & required_flags) == required_flags) {
-            return true;
+        if (miso__tile_scene_in_bounds(scene, left_x, y)) {
+            const size_t idx = miso__tile_scene_index(scene, left_x, y);
+            if (tilemap->tiles[idx] != MISO_TILE_EMPTY && (tilemap->flags[idx] & required_flags) == required_flags) {
+                return true;
+            }
         }
-        if (miso__tile_scene_in_bounds(scene, right_x, y) &&
-            (tilemap->flags[miso__tile_scene_index(scene, right_x, y)] & required_flags) == required_flags) {
-            return true;
+        if (miso__tile_scene_in_bounds(scene, right_x, y)) {
+            const size_t idx = miso__tile_scene_index(scene, right_x, y);
+            if (tilemap->tiles[idx] != MISO_TILE_EMPTY && (tilemap->flags[idx] & required_flags) == required_flags) {
+                return true;
+            }
         }
     }
 
     return false;
+}
+
+static bool miso__tilemap_footprint_has_terrain(const MisoTileScene *const scene,
+                                                const MisoTilemap *const tilemap,
+                                                const int min_x,
+                                                const int min_y,
+                                                const int max_x,
+                                                const int max_y) {
+    for (int y = min_y; y <= max_y; y++) {
+        for (int x = min_x; x <= max_x; x++) {
+            if (!miso__tile_scene_in_bounds(scene, x, y)) {
+                return false;
+            }
+            if (tilemap->tiles[miso__tile_scene_index(scene, x, y)] == MISO_TILE_EMPTY) {
+                return false;
+            }
+        }
+    }
+
+    return true;
+}
+
+static bool miso__tilemap_footprint_occupiable(const MisoTileScene *const scene,
+                                               const MisoTilemap *const tilemap,
+                                               const MisoTileFootprint *const footprint,
+                                               const int tile_x,
+                                               const int tile_y) {
+    int min_x = 0;
+    int min_y = 0;
+    int max_x = 0;
+    int max_y = 0;
+    miso__tile_footprint_bounds(tile_x, tile_y, footprint, &min_x, &min_y, &max_x, &max_y);
+    return miso__tilemap_footprint_has_terrain(scene, tilemap, min_x, min_y, max_x, max_y);
+}
+
+static bool miso__tile_overlay_sync_gpu(MisoTileOverlay *const overlay) {
+    if (!overlay || !overlay->scene || !overlay->rgba8) {
+        return false;
+    }
+
+    const int width = overlay->scene->map.width_tiles;
+    const int height = overlay->scene->map.height_tiles;
+    if (!overlay->texture) {
+        overlay->texture = miso__renderer_create_rgba8_texture(width, height, overlay->rgba8);
+        overlay->dirty = overlay->texture == nullptr;
+        return overlay->texture != nullptr;
+    }
+
+    if (!overlay->dirty) {
+        return true;
+    }
+
+    if (!miso__renderer_update_rgba8_texture(overlay->texture, width, height, overlay->rgba8)) {
+        return false;
+    }
+    overlay->dirty = false;
+    return true;
 }
 
 static void miso__tilemap_rebuild_cache(MisoTilemap *const tilemap, const MisoTileScene *const scene) {
@@ -305,17 +382,21 @@ static void miso__tilemap_rebuild_cache(MisoTilemap *const tilemap, const MisoTi
         return;
     }
 
+    uint32_t instance_count = 0;
     for (int y = 0; y < scene->map.height_tiles; y++) {
         for (int x = 0; x < scene->map.width_tiles; x++) {
             const size_t idx = miso__tile_scene_index(scene, x, y);
             const uint32_t tile_id = tilemap->tiles[idx];
+            if (!miso__tilemap_valid_tile_id(tilemap, tile_id) || tile_id == MISO_TILE_EMPTY) {
+                continue;
+            }
             const uint32_t col = tile_id % tilemap->atlas_columns;
             const uint32_t row = tile_id / tilemap->atlas_columns;
             float world_x = 0.0f;
             float world_y = 0.0f;
             miso_iso_tile_to_world(&scene->map, x, y, &world_x, &world_y);
 
-            tilemap->render_cache[idx] = (MisoSpriteInstance){
+            tilemap->render_cache[instance_count++] = (MisoSpriteInstance){
                 .x = world_x,
                 .y = world_y,
                 .z = miso_tile_scene_depth_at_tile(scene, (float)x, (float)y),
@@ -332,6 +413,7 @@ static void miso__tilemap_rebuild_cache(MisoTilemap *const tilemap, const MisoTi
         }
     }
 
+    tilemap->render_cache_count = instance_count;
     tilemap->cache_dirty = false;
 }
 
@@ -392,13 +474,14 @@ MisoTilemap *miso_tilemap_create(MisoTileScene *const scene, const MisoTilemapDe
     }
 
     const size_t tile_count = miso__tile_scene_tile_count(scene);
-    tilemap->tiles = SDL_calloc(tile_count, sizeof(uint32_t));
+    tilemap->tiles = SDL_malloc(tile_count * sizeof(uint32_t));
     tilemap->flags = SDL_calloc(tile_count, sizeof(uint32_t));
     tilemap->render_cache = SDL_calloc(tile_count, sizeof(MisoSpriteInstance));
     if (!tilemap->tiles || !tilemap->flags || !tilemap->render_cache) {
         miso_tilemap_destroy(tilemap);
         return nullptr;
     }
+    SDL_memset4(tilemap->tiles, MISO_TILE_EMPTY, tile_count);
 
     tilemap->scene = scene;
     tilemap->texture = desc->texture;
@@ -518,21 +601,35 @@ void miso_tilemap_set_tint_overlay(MisoTilemap *const tilemap, MisoTileOverlay *
 }
 
 bool miso_tilemap_set_tile(MisoTilemap *const tilemap, const int tx, const int ty, const uint32_t tile_id) {
-    if (!tilemap || !miso__tile_scene_in_bounds(tilemap->scene, tx, ty)) {
+    if (!tilemap || !miso__tile_scene_in_bounds(tilemap->scene, tx, ty) ||
+        !miso__tilemap_valid_tile_id(tilemap, tile_id)) {
         return false;
     }
 
-    tilemap->tiles[miso__tile_scene_index(tilemap->scene, tx, ty)] = tile_id;
+    const size_t idx = miso__tile_scene_index(tilemap->scene, tx, ty);
+    tilemap->tiles[idx] = tile_id;
+    if (tile_id == MISO_TILE_EMPTY) {
+        tilemap->flags[idx] = MISO_TILE_FLAG_NONE;
+    }
     tilemap->cache_dirty = true;
     return true;
 }
 
 uint32_t miso_tilemap_get_tile(const MisoTilemap *const tilemap, const int tx, const int ty) {
     if (!tilemap || !miso__tile_scene_in_bounds(tilemap->scene, tx, ty)) {
-        return 0;
+        return MISO_TILE_EMPTY;
     }
 
     return tilemap->tiles[miso__tile_scene_index(tilemap->scene, tx, ty)];
+}
+
+bool miso_tilemap_has_tile(const MisoTilemap *const tilemap, const int tx, const int ty) {
+    return tilemap && miso__tile_scene_in_bounds(tilemap->scene, tx, ty) &&
+           tilemap->tiles[miso__tile_scene_index(tilemap->scene, tx, ty)] != MISO_TILE_EMPTY;
+}
+
+bool miso_tilemap_clear_tile(MisoTilemap *const tilemap, const int tx, const int ty) {
+    return miso_tilemap_set_tile(tilemap, tx, ty, MISO_TILE_EMPTY);
 }
 
 bool miso_tilemap_set_flags(MisoTilemap *const tilemap, const int tx, const int ty, const uint32_t flags) {
@@ -554,16 +651,20 @@ uint32_t miso_tilemap_get_flags(const MisoTilemap *const tilemap, const int tx, 
 }
 
 void miso_tilemap_fill(MisoTilemap *const tilemap, const uint32_t tile_id, const uint32_t flags) {
-    if (!tilemap || !tilemap->scene) {
+    if (!tilemap || !tilemap->scene || !miso__tilemap_valid_tile_id(tilemap, tile_id)) {
         return;
     }
 
     const size_t tile_count = miso__tile_scene_tile_count(tilemap->scene);
     for (size_t i = 0; i < tile_count; i++) {
         tilemap->tiles[i] = tile_id;
-        tilemap->flags[i] = flags;
+        tilemap->flags[i] = tile_id == MISO_TILE_EMPTY ? MISO_TILE_FLAG_NONE : flags;
     }
     tilemap->cache_dirty = true;
+}
+
+void miso_tilemap_clear(MisoTilemap *const tilemap) {
+    miso_tilemap_fill(tilemap, MISO_TILE_EMPTY, MISO_TILE_FLAG_NONE);
 }
 
 MisoTilePlacementProblem miso_tile_scene_check_placement(const MisoTileScene *const scene,
@@ -588,6 +689,10 @@ MisoTilePlacementProblem miso_tile_scene_check_placement(const MisoTileScene *co
             }
 
             const size_t idx = miso__tile_scene_index(scene, x, y);
+            if (tilemap->tiles[idx] == MISO_TILE_EMPTY) {
+                result |= MISO_TILE_PLACE_MISSING_TERRAIN;
+                continue;
+            }
             if (query->occupied_mask != 0 && (scene->occupancy[idx] & query->occupied_mask) != 0) {
                 result |= MISO_TILE_PLACE_OCCUPIED;
             }
@@ -614,7 +719,10 @@ MisoResult miso_tile_scene_place_object(MisoTileScene *const scene,
                                         const MisoTilemap *const tilemap,
                                         const MisoTileObjectDesc *const desc,
                                         MisoTileObjectId *const out_id) {
-    if (!scene || !tilemap || !desc || !miso__tile_footprint_valid(&desc->footprint)) {
+    if (!scene || !tilemap || tilemap->scene != scene || !desc || !miso__tile_footprint_valid(&desc->footprint)) {
+        return MISO_ERR_INVALID_ARG;
+    }
+    if (!miso__tilemap_footprint_occupiable(scene, tilemap, &desc->footprint, desc->tile_x, desc->tile_y)) {
         return MISO_ERR_INVALID_ARG;
     }
 
@@ -937,6 +1045,9 @@ void miso_tilemap_render(const MisoEngine *const engine,
     if (tilemap->cache_dirty) {
         miso__tilemap_rebuild_cache(tilemap, scene);
     }
+    if (tilemap->render_cache_count == 0) {
+        return;
+    }
 
     if (tilemap->tint_overlay && !miso__tile_overlay_sync_gpu(tilemap->tint_overlay)) {
         return;
@@ -949,6 +1060,7 @@ void miso_tilemap_render(const MisoEngine *const engine,
                                                scene->map.height_tiles,
                                                tilemap->tint_overlay_strength);
     }
+    miso_render_submit_sprites(engine, tilemap->texture, tilemap->render_cache, (int)tilemap->render_cache_count);
     miso__renderer_set_sprite_tint_overlay(nullptr, 0, 0, 0.0f);
     miso_render_end_world(engine);
 }

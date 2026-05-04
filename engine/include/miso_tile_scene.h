@@ -6,6 +6,8 @@
 #include "miso_render.h"
 #include "miso_world.h"
 
+#include <SDL3/SDL_stdinc.h> //SDL_MAX_UINT32
+
 typedef struct MisoTileScene MisoTileScene;
 typedef struct MisoTilemap MisoTilemap;
 typedef struct MisoTileOverlay MisoTileOverlay;
@@ -13,6 +15,9 @@ typedef struct MisoTileOverlay MisoTileOverlay;
 typedef uint32_t MisoTileObjectId;
 typedef uint32_t MisoTileObjectTypeId;
 typedef uint32_t MisoTileVisualId;
+
+/** Sentinel tile id used for cells without terrain. Empty tiles are not rendered. */
+#define MISO_TILE_EMPTY SDL_MAX_UINT32
 
 typedef uint32_t MisoTileFlags;
 typedef enum MisoTileFlag : MisoTileFlags {
@@ -30,11 +35,8 @@ typedef enum MisoTileFlag : MisoTileFlags {
     MISO_TILE_FLAG_USER_MASK = 0xFFFF0000u
 } MisoTileFlag;
 
-
-static inline MisoTileFlags miso_tile_user_flag(const uint32_t index) {
-    return index < MISO_TILE_FLAG_USER_COUNT
-        ? (MisoTileFlags)(1u << (MISO_TILE_FLAG_USER_SHIFT + index))
-        : 0u;
+static inline MisoTileFlags miso_tile_user_flag(const MisoTileFlags index) {
+    return index < MISO_TILE_FLAG_USER_COUNT ? (MisoTileFlags)(1u << (MISO_TILE_FLAG_USER_SHIFT + index)) : 0u;
 }
 
 typedef uint8_t MisoTileOccupancyMask;
@@ -53,6 +55,7 @@ typedef enum MisoTilePlacementProblem : MisoTilePlacementProblemMask {
     MISO_TILE_PLACE_HAS_FORBIDDEN_FLAGS = 1u << 3u,
     MISO_TILE_PLACE_MISSING_ADJACENCY = 1u << 4u,
     MISO_TILE_PLACE_INVALID_ARGUMENT = 1u << 5u,
+    MISO_TILE_PLACE_MISSING_TERRAIN = 1u << 6u,
 } MisoTilePlacementProblem;
 
 typedef struct MisoTileSceneDesc {
@@ -83,20 +86,20 @@ typedef struct MisoTileOverlayDesc {
 } MisoTileOverlayDesc;
 
 typedef struct MisoTileFootprint {
-    int width;
-    int height;
-    int anchor_x;
-    int anchor_y;
+    uint16_t width;
+    uint16_t height;
+    uint16_t anchor_x;
+    uint16_t anchor_y;
 } MisoTileFootprint;
 
 typedef struct MisoTilePlacementQuery {
     int tile_x;
     int tile_y;
+    MisoTileFlags required_tile_flags;
+    MisoTileFlags forbidden_tile_flags;
+    MisoTileFlags required_adjacent_tile_flags;
     MisoTileFootprint footprint;
-    uint32_t required_tile_flags;
-    uint32_t forbidden_tile_flags;
-    uint8_t occupied_mask;
-    uint32_t required_adjacent_tile_flags;
+    MisoTileOccupancyMask occupied_mask;
 } MisoTilePlacementQuery;
 
 typedef struct MisoTileObjectDesc {
@@ -111,15 +114,15 @@ typedef struct MisoTileObjectDesc {
 } MisoTileObjectDesc;
 
 typedef struct MisoTileObjectInfo {
+    uint64_t game_ref;
     MisoTileObjectId id;
     MisoTileObjectTypeId type_id;
     int tile_x;
     int tile_y;
-    MisoTileFootprint footprint;
     MisoTileVisualId visual_id;
-    uint8_t occupancy_mask;
+    MisoTileFootprint footprint;
+    MisoTileOccupancyMask occupancy_mask;
     bool pickable;
-    uint64_t game_ref;
 } MisoTileObjectInfo;
 
 /**
@@ -180,6 +183,8 @@ void miso_tilemap_destroy(MisoTilemap *tilemap);
  */
 bool miso_tilemap_set_tile(MisoTilemap *tilemap, int tx, int ty, uint32_t tile_id);
 uint32_t miso_tilemap_get_tile(const MisoTilemap *tilemap, int tx, int ty);
+bool miso_tilemap_has_tile(const MisoTilemap *tilemap, int tx, int ty);
+bool miso_tilemap_clear_tile(MisoTilemap *tilemap, int tx, int ty);
 /**
  * Sets generic per-tile flags and marks the tilemap render cache dirty.
  *
@@ -189,8 +194,8 @@ uint32_t miso_tilemap_get_tile(const MisoTilemap *tilemap, int tx, int ty);
  * \param flags Bitmask of MisoTileFlag values and user flags.
  * \return true when the flags were updated.
  */
-bool miso_tilemap_set_flags(MisoTilemap *tilemap, int tx, int ty, uint32_t flags);
-uint32_t miso_tilemap_get_flags(const MisoTilemap *tilemap, int tx, int ty);
+bool miso_tilemap_set_flags(MisoTilemap *tilemap, int tx, int ty, MisoTileFlags flags);
+MisoTileFlags miso_tilemap_get_flags(const MisoTilemap *tilemap, int tx, int ty);
 /**
  * Fills all tile ids and flags, then marks the tilemap render cache dirty.
  *
@@ -198,7 +203,8 @@ uint32_t miso_tilemap_get_flags(const MisoTilemap *tilemap, int tx, int ty);
  * \param tile_id Atlas tile id assigned to every tile.
  * \param flags Bitmask assigned to every tile.
  */
-void miso_tilemap_fill(MisoTilemap *tilemap, uint32_t tile_id, uint32_t flags);
+void miso_tilemap_fill(MisoTilemap *tilemap, uint32_t tile_id, MisoTileFlags flags);
+void miso_tilemap_clear(MisoTilemap *tilemap);
 
 /**
  * Creates an RGBA8 per-tile overlay buffer for a scene.
