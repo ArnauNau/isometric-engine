@@ -177,6 +177,12 @@ static int run_tile_scene_placement_case(void) {
         return failf("failed to create tilemap");
     }
 
+    if (miso_tilemap_get_tile(tilemap, 0, 0) != MISO_TILE_EMPTY || miso_tilemap_has_tile(tilemap, 0, 0)) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("expected new tilemap cells to initialize empty");
+    }
+
     miso_tilemap_fill(tilemap, 0, MISO_TILE_FLAG_BUILDABLE | MISO_TILE_FLAG_WALKABLE);
     miso_tilemap_set_flags(tilemap, 4, 2, MISO_TILE_FLAG_PATH | MISO_TILE_FLAG_WALKABLE);
 
@@ -239,6 +245,33 @@ static int run_tile_scene_placement_case(void) {
         return failf("failed to remove object and clear occupancy");
     }
 
+    if (!miso_tilemap_clear_tile(tilemap, 2, 2) || miso_tilemap_has_tile(tilemap, 2, 2) ||
+        miso_tilemap_get_tile(tilemap, 2, 2) != MISO_TILE_EMPTY) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("failed to clear tile to empty terrain");
+    }
+
+    if ((miso_tile_scene_check_placement(scene, tilemap, &query) & MISO_TILE_PLACE_MISSING_TERRAIN) == 0) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("expected empty tile footprint to report missing terrain");
+    }
+
+    if (miso_tile_scene_place_object(scene, tilemap, &object, nullptr) != MISO_ERR_INVALID_ARG) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("expected object placement on empty terrain to fail");
+    }
+
+    miso_tilemap_clear(tilemap);
+    if (miso_tilemap_get_tile(tilemap, 0, 0) != MISO_TILE_EMPTY ||
+        miso_tilemap_get_flags(tilemap, 0, 0) != MISO_TILE_FLAG_NONE) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("failed to clear tilemap to empty terrain");
+    }
+
     miso_tilemap_destroy(tilemap);
     miso_tile_scene_destroy(scene);
     return 0;
@@ -276,12 +309,63 @@ static int run_tile_scene_fractional_coords_case(void) {
     return 0;
 }
 
+static int run_tile_overlay_buffer_case(void) {
+    const MisoTileSceneDesc scene_desc = {
+        .map = g_desc,
+    };
+    MisoTileScene *const scene = miso_tile_scene_create((MisoEngine *)(uintptr_t)1, &scene_desc);
+    if (!scene) {
+        return failf("failed to create tile scene");
+    }
+
+    const MisoTileOverlayDesc overlay_desc = {
+        .clear_rgba8 = 0x00000000u,
+    };
+    MisoTileOverlay *const overlay = miso_tile_overlay_create(scene, &overlay_desc);
+    if (!overlay) {
+        miso_tile_scene_destroy(scene);
+        return failf("failed to create tile overlay");
+    }
+
+    if (miso_tile_overlay_get_tile_rgba8(overlay, 2, 3) != 0x00000000u) {
+        miso_tile_overlay_destroy(overlay);
+        miso_tile_scene_destroy(scene);
+        return failf("overlay did not initialize to clear color");
+    }
+
+    if (!miso_tile_overlay_set_tile_rgba8(overlay, 2, 3, 0x00FF00CCu) ||
+        miso_tile_overlay_get_tile_rgba8(overlay, 2, 3) != 0x00FF00CCu) {
+        miso_tile_overlay_destroy(overlay);
+        miso_tile_scene_destroy(scene);
+        return failf("overlay set/get tile failed");
+    }
+
+    const MisoTileFootprint footprint = {.width = 2, .height = 2, .anchor_x = 0, .anchor_y = 0};
+    miso_tile_overlay_fill_footprint(overlay, 4, 4, footprint, 0xFF000080u);
+    if (miso_tile_overlay_get_tile_rgba8(overlay, 5, 5) != 0xFF000080u) {
+        miso_tile_overlay_destroy(overlay);
+        miso_tile_scene_destroy(scene);
+        return failf("overlay footprint fill failed");
+    }
+
+    miso_tile_overlay_clear(overlay, 0x11223344u);
+    if (miso_tile_overlay_get_tile_rgba8(overlay, 5, 5) != 0x11223344u) {
+        miso_tile_overlay_destroy(overlay);
+        miso_tile_scene_destroy(scene);
+        return failf("overlay clear failed");
+    }
+
+    miso_tile_overlay_destroy(overlay);
+    miso_tile_scene_destroy(scene);
+    return 0;
+}
+
 int main(const int argc, const char *const *const argv) {
     if (argc != 3 || SDL_strcmp(argv[1], "--case") != 0) {
         fprintf(stderr,
                 "usage: %s --case "
                 "<tile-to-world|world-to-tile-center|world-to-tile-floor-boundary|tile-scene-placement|"
-                "tile-scene-fractional-coords>\n",
+                "tile-scene-fractional-coords|tile-overlay-buffer>\n",
                 argv[0]);
         return 2;
     }
@@ -300,6 +384,9 @@ int main(const int argc, const char *const *const argv) {
     }
     if (SDL_strcmp(argv[2], "tile-scene-fractional-coords") == 0) {
         return run_tile_scene_fractional_coords_case();
+    }
+    if (SDL_strcmp(argv[2], "tile-overlay-buffer") == 0) {
+        return run_tile_overlay_buffer_case();
     }
 
     fprintf(stderr, "unknown test case: %s\n", argv[2]);

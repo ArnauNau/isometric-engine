@@ -238,6 +238,9 @@ if(MISO_BUILD_TESTS)
     add_test(NAME miso_tile_scene_fractional_coords
         COMMAND miso_engine_tests --case tile-scene-fractional-coords
     )
+    add_test(NAME miso_tile_overlay_buffer
+        COMMAND miso_engine_tests --case tile-overlay-buffer
+    )
     add_test(NAME miso_cafe_hidpi_tile_pick
         COMMAND miso_unit_tests --case cafe-hidpi
     )
