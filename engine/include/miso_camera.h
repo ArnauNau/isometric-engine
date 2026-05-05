@@ -30,6 +30,17 @@ typedef struct MisoViewportRect {
 MisoCameraId miso_camera_create(MisoEngine *engine);
 
 /**
+ * Sets the camera's position to be pixel snapped or not.
+ *
+ * Invalid engines or camera ids are ignored.
+ *
+ * @param engine Engine that owns the camera.
+ * @param camera_id Camera to update.
+ * @param pixel_snap Enable (true) or disable (false) pixel snapping.
+ */
+void miso_camera_set_pixel_snap(MisoEngine *engine, MisoCameraId camera_id, bool pixel_snap);
+
+/**
  * Sets a fixed pixel viewport for a camera.
  *
  * Width and height are clamped to at least 1. Invalid engines or camera ids are
@@ -50,6 +61,7 @@ void miso_camera_set_viewport(MisoEngine *engine, MisoCameraId camera_id, int x,
  * Values are clamped to 0..1 and resolved to pixels immediately and whenever
  * the window is resized. Use pixel viewports for fixed-size/editor layouts;
  * use normalized viewports for cameras that should scale with the window.
+ * Invalid engines or camera ids are ignored.
  *
  * \param engine Engine that owns the camera.
  * \param camera_id Camera to update.

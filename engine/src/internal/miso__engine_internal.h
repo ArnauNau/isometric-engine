@@ -7,13 +7,13 @@
 #include <SDL3/SDL.h>
 
 typedef struct MisoCameraState {
-    bool used;
     float x;
     float y;
     float zoom;
     SDL_Rect viewport;
-    bool viewport_normalized;
     MisoViewportRect normalized_viewport;
+    bool viewport_normalized;
+    bool used;
     bool pixel_snap;
 } MisoCameraState;
 

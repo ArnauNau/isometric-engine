@@ -41,6 +41,14 @@ void miso__camera_resolve_normalized_viewports(MisoEngine *const engine,
     }
 }
 
+void miso_camera_set_pixel_snap(MisoEngine *const engine, const MisoCameraId camera_id, const bool pixel_snap) {
+    MisoCameraState *const camera = miso__camera_get_mut(engine, camera_id);
+    if (!camera) {
+        return;
+    }
+    camera->pixel_snap = pixel_snap;
+}
+
 void miso_camera_set_viewport(
     MisoEngine *const engine, const MisoCameraId camera_id, const int x, const int y, int width, int height) {
     MisoCameraState *const camera = miso__camera_get_mut(engine, camera_id);
