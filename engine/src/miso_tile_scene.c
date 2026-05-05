@@ -11,8 +11,8 @@ typedef struct MisoTileObjectRecord {
     MisoTileObjectId id;
     MisoTileObjectTypeId type_id;
     MisoTileVisualId visual_id;
-    uint32_t tile_x;
-    uint32_t tile_y;
+    int32_t tile_x;
+    int32_t tile_y;
     MisoTileOccupancyMask occupancy_mask;
     bool pickable;
     bool active;
