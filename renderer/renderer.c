@@ -147,8 +147,16 @@ static bool g_frame_active = false;
 static float g_screen_projection[16] = {0};
 
 static inline Uint32 renderer_align_up(const Uint32 value, const Uint32 align) {
-    const Uint32 mask = align - 1U;
-    return (value + mask) & ~mask;
+    if (align == 0U) {
+        return value;
+    }
+
+    const Uint32 remainder = value % align;
+    if (remainder == 0U) {
+        return value;
+    }
+
+    return value + (align - remainder);
 }
 
 static void renderer_make_screen_projection(float out[16]) {
