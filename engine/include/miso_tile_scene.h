@@ -125,6 +125,15 @@ typedef struct MisoTileObjectInfo {
     bool pickable;
 } MisoTileObjectInfo;
 
+typedef struct MisoTileSceneStats {
+    Uint32 active_object_count;
+    Uint32 object_storage_count;
+    Uint32 object_capacity;
+    Uint64 place_calls;
+    Uint64 remove_calls;
+    Uint64 remove_scan_steps;
+} MisoTileSceneStats;
+
 /**
  * Visual definition for tile objects rendered by the tile scene.
  *
@@ -255,6 +264,8 @@ bool miso_tile_scene_pick_object_at_screen(const MisoTileScene *scene,
                                            int sy,
                                            MisoTileObjectId *out_id);
 int miso_tile_scene_get_objects(const MisoTileScene *scene, MisoTileObjectInfo *out_items, int capacity);
+bool miso_tile_scene_get_stats(const MisoTileScene *scene, MisoTileSceneStats *out_stats);
+void miso_tile_scene_reset_stats(MisoTileScene *scene);
 
 /**
  * Registers or replaces a visual definition used by tile objects.

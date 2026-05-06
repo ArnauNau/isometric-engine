@@ -44,7 +44,7 @@ static Uint32 g_allowed_frames_in_flight = RENDERER_DEFAULT_ALLOWED_FRAMES_IN_FL
 #define RENDERER_MAX_UI_TEXT_RANGES 16U
 #define RENDERER_MAX_FRAME_MATRICES 8U
 
-#define RENDERER_SPRITE_SLOT_BYTES (sizeof(SpriteInstance) * 100000U)
+#define RENDERER_SPRITE_SLOT_BYTES (sizeof(SpriteInstance) * 1200000U)
 #define RENDERER_WORLD_GEOM_SLOT_BYTES (sizeof(SDL_Vertex) * 65536U)
 #define RENDERER_LINE_SLOT_BYTES (sizeof(float) * 3U * 65536U)
 #define RENDERER_UI_GEOM_SLOT_BYTES (sizeof(SDL_Vertex) * 131072U)

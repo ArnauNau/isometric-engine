@@ -31,6 +31,7 @@ typedef struct MisoTileObjectVisualRecord {
 struct MisoTileScene {
     MisoIsoMapDesc map;
     Uint32 object_count;
+    Uint32 active_object_count;
     Uint32 object_capacity;
     Uint32 visual_count;
     Uint32 visual_capacity;
@@ -41,6 +42,7 @@ struct MisoTileScene {
     MisoTileObjectRecord *objects;
     MisoTileObjectVisualRecord *visuals;
     MisoSpriteInstance *object_render_cache;
+    MisoTileSceneStats stats;
 };
 
 struct MisoTilemap {
@@ -547,10 +549,7 @@ void miso_tile_overlay_clear(MisoTileOverlay *const overlay, const Uint32 rgba8)
     overlay->dirty = true;
 }
 
-bool miso_tile_overlay_set_tile_rgba8(MisoTileOverlay *const overlay,
-                                      const int tx,
-                                      const int ty,
-                                      const Uint32 rgba8) {
+bool miso_tile_overlay_set_tile_rgba8(MisoTileOverlay *const overlay, const int tx, const int ty, const Uint32 rgba8) {
     if (!overlay || !miso__tile_scene_in_bounds(overlay->scene, tx, ty)) {
         return false;
     }
@@ -719,6 +718,9 @@ MisoResult miso_tile_scene_place_object(MisoTileScene *const scene,
                                         const MisoTilemap *const tilemap,
                                         const MisoTileObjectDesc *const desc,
                                         MisoTileObjectId *const out_id) {
+    if (scene) {
+        scene->stats.place_calls++;
+    }
     if (!scene || !tilemap || tilemap->scene != scene || !desc || !miso__tile_footprint_valid(&desc->footprint)) {
         return MISO_ERR_INVALID_ARG;
     }
@@ -752,6 +754,7 @@ MisoResult miso_tile_scene_place_object(MisoTileScene *const scene,
     record->pickable = desc->pickable;
     record->game_ref = desc->game_ref;
     record->active = true;
+    scene->active_object_count++;
 
     int min_x = 0;
     int min_y = 0;
@@ -772,11 +775,15 @@ MisoResult miso_tile_scene_place_object(MisoTileScene *const scene,
 }
 
 MisoResult miso_tile_scene_remove_object(MisoTileScene *const scene, const MisoTileObjectId object_id) {
+    if (scene) {
+        scene->stats.remove_calls++;
+    }
     if (!scene || object_id == 0) {
         return MISO_ERR_INVALID_ARG;
     }
 
     for (Uint32 i = 0; i < scene->object_count; i++) {
+        scene->stats.remove_scan_steps++;
         MisoTileObjectRecord *const record = &scene->objects[i];
         if (!record->active || record->id != object_id) {
             continue;
@@ -794,6 +801,9 @@ MisoResult miso_tile_scene_remove_object(MisoTileScene *const scene, const MisoT
         }
 
         record->active = false;
+        if (scene->active_object_count > 0U) {
+            scene->active_object_count--;
+        }
         return MISO_OK;
     }
 
@@ -810,6 +820,7 @@ void miso_tile_scene_clear_objects(MisoTileScene *const scene) {
         SDL_memset(scene->objects, 0, sizeof(MisoTileObjectRecord) * scene->object_capacity);
     }
     scene->object_count = 0;
+    scene->active_object_count = 0;
     scene->next_object_id = 1;
 }
 
@@ -884,6 +895,26 @@ int miso_tile_scene_get_objects(const MisoTileScene *const scene,
     }
 
     return written;
+}
+
+bool miso_tile_scene_get_stats(const MisoTileScene *const scene, MisoTileSceneStats *const out_stats) {
+    if (!scene || !out_stats) {
+        return false;
+    }
+
+    *out_stats = scene->stats;
+    out_stats->active_object_count = scene->active_object_count;
+    out_stats->object_storage_count = scene->object_count;
+    out_stats->object_capacity = scene->object_capacity;
+    return true;
+}
+
+void miso_tile_scene_reset_stats(MisoTileScene *const scene) {
+    if (!scene) {
+        return;
+    }
+
+    scene->stats = (MisoTileSceneStats){0};
 }
 
 MisoResult miso_tile_scene_set_object_visual(MisoTileScene *const scene, const MisoTileObjectVisualDesc *const desc) {
