@@ -79,7 +79,7 @@ static void miso__log_library_versions(void) {
                     SDL_VERSIONNUM_MICRO(TTF_Version()));
     }
 
-    const char *base_path = SDL_GetBasePath();
+    const char *const base_path = SDL_GetBasePath();
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "SDL Base Path: %s", base_path ? base_path : "(null)");
 
     SDL_LogInfo(SDL_LOG_CATEGORY_APPLICATION, "miso version: " MISO_VERSION);
@@ -91,7 +91,7 @@ static bool miso__ensure_camera_capacity(MisoEngine *const engine) {
     }
 
     const uint32_t new_capacity = engine->camera_capacity == 0 ? 4U : engine->camera_capacity * 2U;
-    MisoCameraState *new_cameras = SDL_realloc(engine->cameras, sizeof(MisoCameraState) * new_capacity);
+    MisoCameraState *const new_cameras = SDL_realloc(engine->cameras, sizeof(MisoCameraState) * new_capacity);
     if (!new_cameras) {
         return false;
     }
@@ -267,7 +267,7 @@ MisoResult miso_create(const MisoConfig *const cfg, MisoEngine **const out_engin
 
     *out_engine = nullptr;
 
-    MisoEngine *engine = SDL_calloc(1, sizeof(MisoEngine));
+    MisoEngine *const engine = SDL_calloc(1, sizeof(MisoEngine));
     if (!engine) {
         return MISO_ERR_OUT_OF_MEMORY;
     }
@@ -520,7 +520,7 @@ MisoCameraState *miso__camera_get_mut(MisoEngine *const engine, const MisoCamera
     if (idx >= engine->camera_count) {
         return nullptr;
     }
-    MisoCameraState *camera = &engine->cameras[idx];
+    MisoCameraState *const camera = &engine->cameras[idx];
     return camera->used ? camera : nullptr;
 }
 
@@ -545,7 +545,7 @@ MisoCameraId miso_camera_create(MisoEngine *const engine) {
         return 0;
     }
 
-    MisoCameraState *camera = &engine->cameras[engine->camera_count];
+    MisoCameraState *const camera = &engine->cameras[engine->camera_count];
     camera->used = true;
     camera->x = 0.0f;
     camera->y = 0.0f;

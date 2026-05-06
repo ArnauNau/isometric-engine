@@ -11,13 +11,13 @@
 typedef struct MisoEngine MisoEngine;
 
 typedef struct MisoConfig {
+    const char *data_root; /* If NULL, engine auto-resolves from the executable base path. */
+    const char *window_title;
     int window_width;
     int window_height;
-    const char *window_title;
+    Uint16 sim_tick_hz;
+    Uint16 max_sim_steps_per_frame;
     bool enable_vsync;
-    const char *data_root; /* If NULL, engine auto-resolves from the executable base path. */
-    int sim_tick_hz;
-    int max_sim_steps_per_frame;
 } MisoConfig;
 
 typedef enum MisoResult {
@@ -32,7 +32,7 @@ typedef enum MisoResult {
 } MisoResult;
 
 typedef struct MisoByteBuffer {
-    uint8_t *data;
+    Uint8 *data;
     size_t size;
 } MisoByteBuffer;
 
@@ -109,7 +109,7 @@ typedef struct MisoGameHooks {
      * \param out_payload_version Receives game-defined payload version.
      * \return MISO_OK on success or an error code.
      */
-    MisoResult (*on_save)(const void *game_ctx, MisoByteBuffer *out_payload, uint32_t *out_payload_version);
+    MisoResult (*on_save)(const void *game_ctx, MisoByteBuffer *out_payload, Uint32 *out_payload_version);
 
     /**
      * Loads game-owned payload bytes from miso_load_game().
@@ -122,7 +122,7 @@ typedef struct MisoGameHooks {
      * \param payload_version Game-defined payload version from the save envelope.
      * \return MISO_OK on success or an error code.
      */
-    MisoResult (*on_load)(void *game_ctx, const uint8_t *payload, size_t payload_size, uint32_t payload_version);
+    MisoResult (*on_load)(void *game_ctx, const uint8_t *payload, size_t payload_size, Uint32 payload_version);
 
     /**
      * Resets game state after registration.

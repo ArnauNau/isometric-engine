@@ -196,7 +196,7 @@ void UI_Line(
 // Public API - Text
 // ============================================================================
 
-void UI_TextWithBackground(TTF_Text *text, const float x, const float y) {
+void UI_TextWithBackground(TTF_Text *const text, const float x, const float y) {
     // Default: semi-transparent black with 4px padding
     UI_TextWithBackgroundEx(text, x, y, UI_COLOR_BACKGROUND_DEFAULT, 0.0f);
 }
@@ -234,7 +234,7 @@ void UI_TextColored(TTF_Text *const text, const float x, const float y, const SD
     const TTF_GPUAtlasDrawSequence *seq = TTF_GetGPUTextDrawData(text);
 
     while (seq) {
-        TextAtlasRange *range = text_get_atlas_range(seq->atlas_texture);
+        TextAtlasRange *const range = text_get_atlas_range(seq->atlas_texture);
         if (!range) {
             seq = seq->next;
             continue;

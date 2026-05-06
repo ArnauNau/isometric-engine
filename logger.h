@@ -10,7 +10,7 @@
 #include <stddef.h>
 #include <stdio.h>
 
-static const char *color_for_priority(const SDL_LogPriority p) {
+static inline const char *color_for_priority(const SDL_LogPriority p) {
     switch (p) {
     case SDL_LOG_PRIORITY_ERROR:
         return "\x1b[31m"; // red
@@ -27,7 +27,7 @@ static const char *color_for_priority(const SDL_LogPriority p) {
     }
 }
 
-static const char *name_for_priority(const SDL_LogPriority p) {
+static inline const char *name_for_priority(const SDL_LogPriority p) {
     switch (p) {
     case SDL_LOG_PRIORITY_ERROR:
         return "ERROR";
@@ -44,7 +44,7 @@ static const char *name_for_priority(const SDL_LogPriority p) {
     }
 }
 
-static const char *name_for_category(const int category) {
+static inline const char *name_for_category(const int category) {
     switch (category) {
     case SDL_LOG_CATEGORY_APPLICATION:
         return "APP";

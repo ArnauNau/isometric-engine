@@ -12,14 +12,14 @@ typedef struct MisoTileScene MisoTileScene;
 typedef struct MisoTilemap MisoTilemap;
 typedef struct MisoTileOverlay MisoTileOverlay;
 
-typedef uint32_t MisoTileObjectId;
-typedef uint32_t MisoTileObjectTypeId;
-typedef uint32_t MisoTileVisualId;
+typedef Uint32 MisoTileObjectId;
+typedef Uint32 MisoTileObjectTypeId;
+typedef Uint32 MisoTileVisualId;
 
 /** Sentinel tile id used for cells without terrain. Empty tiles are not rendered. */
 #define MISO_TILE_EMPTY SDL_MAX_UINT32
 
-typedef uint32_t MisoTileFlags;
+typedef Uint32 MisoTileFlags;
 typedef enum MisoTileFlag : MisoTileFlags {
     MISO_TILE_FLAG_NONE = 0,
     MISO_TILE_FLAG_WALKABLE = 1u << 0u,
@@ -39,14 +39,14 @@ static inline MisoTileFlags miso_tile_user_flag(const MisoTileFlags index) {
     return index < MISO_TILE_FLAG_USER_COUNT ? (MisoTileFlags)(1u << (MISO_TILE_FLAG_USER_SHIFT + index)) : 0u;
 }
 
-typedef uint8_t MisoTileOccupancyMask;
+typedef Uint8 MisoTileOccupancyMask;
 typedef enum MisoTileOccupancyFlag : MisoTileOccupancyMask {
     MISO_TILE_OCCUPANCY_NONE = 0,
     MISO_TILE_OCCUPANCY_OBJECT = 1u << 0u,
     MISO_TILE_OCCUPANCY_AGENT = 1u << 1u,
 } MisoTileOccupancyFlag;
 
-typedef uint8_t MisoTilePlacementProblemMask;
+typedef Uint8 MisoTilePlacementProblemMask;
 typedef enum MisoTilePlacementProblem : MisoTilePlacementProblemMask {
     MISO_TILE_PLACE_OK = 0,
     MISO_TILE_PLACE_OUT_OF_BOUNDS = 1u << 0u,
@@ -75,21 +75,21 @@ typedef struct MisoTilemapDesc {
     /** Loaded texture handle containing the tile atlas. */
     MisoTextureHandle texture;
     /** Atlas column count, or 0 to derive from texture width and scene tile width. */
-    uint16_t atlas_columns;
+    Uint16 atlas_columns;
     /** Atlas row count, or 0 to derive from texture height and scene tile height. */
-    uint16_t atlas_rows;
+    Uint16 atlas_rows;
 } MisoTilemapDesc;
 
 typedef struct MisoTileOverlayDesc {
     /** Initial color for every overlay tile, encoded as 0xRRGGBBAA. */
-    uint32_t clear_rgba8;
+    Uint32 clear_rgba8;
 } MisoTileOverlayDesc;
 
 typedef struct MisoTileFootprint {
-    uint16_t width;
-    uint16_t height;
-    uint16_t anchor_x;
-    uint16_t anchor_y;
+    Uint16 width;
+    Uint16 height;
+    Uint16 anchor_x;
+    Uint16 anchor_y;
 } MisoTileFootprint;
 
 typedef struct MisoTilePlacementQuery {
@@ -110,11 +110,11 @@ typedef struct MisoTileObjectDesc {
     MisoTileVisualId visual_id;
     uint8_t occupancy_mask;
     bool pickable;
-    uint64_t game_ref;
+    Uint64 game_ref;
 } MisoTileObjectDesc;
 
 typedef struct MisoTileObjectInfo {
-    uint64_t game_ref;
+    Uint64 game_ref;
     MisoTileObjectId id;
     MisoTileObjectTypeId type_id;
     int tile_x;
@@ -139,11 +139,11 @@ typedef struct MisoTileObjectVisualDesc {
     /** Loaded texture handle containing the visual atlas. */
     MisoTextureHandle texture;
     /** Atlas column count, or 0 to derive from texture width and scene tile width. */
-    uint16_t atlas_columns;
+    Uint16 atlas_columns;
     /** Atlas row count, or 0 to derive from texture height and scene tile height. */
-    uint16_t atlas_rows;
+    Uint16 atlas_rows;
     /** Atlas tile id used as the visual's top-left source tile. */
-    uint32_t atlas_tile_id;
+    Uint32 atlas_tile_id;
     /** Visual width in tile units. */
     int sprite_w_tiles;
     /** Visual height in tile units. */
@@ -181,8 +181,8 @@ void miso_tilemap_destroy(MisoTilemap *tilemap);
  * \param tile_id Atlas tile id.
  * \return true when the tile was updated.
  */
-bool miso_tilemap_set_tile(MisoTilemap *tilemap, int tx, int ty, uint32_t tile_id);
-uint32_t miso_tilemap_get_tile(const MisoTilemap *tilemap, int tx, int ty);
+bool miso_tilemap_set_tile(MisoTilemap *tilemap, int tx, int ty, Uint32 tile_id);
+Uint32 miso_tilemap_get_tile(const MisoTilemap *tilemap, int tx, int ty);
 bool miso_tilemap_has_tile(const MisoTilemap *tilemap, int tx, int ty);
 bool miso_tilemap_clear_tile(MisoTilemap *tilemap, int tx, int ty);
 /**
@@ -203,7 +203,7 @@ MisoTileFlags miso_tilemap_get_flags(const MisoTilemap *tilemap, int tx, int ty)
  * \param tile_id Atlas tile id assigned to every tile.
  * \param flags Bitmask assigned to every tile.
  */
-void miso_tilemap_fill(MisoTilemap *tilemap, uint32_t tile_id, MisoTileFlags flags);
+void miso_tilemap_fill(MisoTilemap *tilemap, Uint32 tile_id, MisoTileFlags flags);
 void miso_tilemap_clear(MisoTilemap *tilemap);
 
 /**
@@ -220,10 +220,10 @@ void miso_tilemap_clear(MisoTilemap *tilemap);
 MisoTileOverlay *miso_tile_overlay_create(MisoTileScene *scene, const MisoTileOverlayDesc *desc);
 void miso_tile_overlay_destroy(MisoTileOverlay *overlay);
 void miso_tile_overlay_clear(MisoTileOverlay *overlay, uint32_t rgba8);
-bool miso_tile_overlay_set_tile_rgba8(MisoTileOverlay *overlay, int tx, int ty, uint32_t rgba8);
-uint32_t miso_tile_overlay_get_tile_rgba8(const MisoTileOverlay *overlay, int tx, int ty);
+bool miso_tile_overlay_set_tile_rgba8(MisoTileOverlay *overlay, int tx, int ty, Uint32 rgba8);
+Uint32 miso_tile_overlay_get_tile_rgba8(const MisoTileOverlay *overlay, int tx, int ty);
 void miso_tile_overlay_fill_footprint(
-    MisoTileOverlay *overlay, int tile_x, int tile_y, MisoTileFootprint footprint, uint32_t rgba8);
+    MisoTileOverlay *overlay, int tile_x, int tile_y, MisoTileFootprint footprint, Uint32 rgba8);
 /**
  * Attaches or detaches a terrain tint overlay for tilemap rendering.
  *
