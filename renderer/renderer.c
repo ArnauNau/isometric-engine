@@ -1539,7 +1539,9 @@ void Renderer_DrawSprites(SDL_GPUTexture *const texture,
         return;
     }
 
-    const Uint32 instance_base = (byte_offset - sprite_stream.slot_base) / (Uint32)sizeof(SpriteInstance);
+    SDL_assert(byte_offset >= sprite_stream.slot_base);
+    SDL_assert((byte_offset % (Uint32)sizeof(SpriteInstance)) == 0U);
+    const Uint32 instance_base = byte_offset / (Uint32)sizeof(SpriteInstance);
 
     SpriteCmd *cmd = nullptr;
     if (sprite_cmd_count > 0) {
