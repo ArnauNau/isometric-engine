@@ -80,14 +80,14 @@ typedef struct {
 typedef struct {
     Uint32 vertex_offset;
     Uint32 vertex_count;
-    uint8_t matrix_index;
+    Uint8 matrix_index;
 } GeometryCmd;
 
 typedef struct {
     Uint32 vertex_offset;
     Uint32 vertex_count;
     SDL_FColor color;
-    uint8_t matrix_index;
+    Uint8 matrix_index;
 } LineCmd;
 
 typedef struct {
@@ -132,8 +132,8 @@ static UITextCmd ui_text_cmds[RENDERER_MAX_UI_TEXT_CMDS] = {0};
 static Uint32 ui_text_cmd_count = 0;
 
 static float frame_matrices[RENDERER_MAX_FRAME_MATRICES][16] = {0};
-static uint8_t frame_matrix_count = 0;
-static uint8_t current_world_matrix_index = 0;
+static Uint8 frame_matrix_count = 0;
+static Uint8 current_world_matrix_index = 0;
 static bool frame_matrix_overflow_logged = false;
 
 static Uint32 current_frame_slot = 0;
@@ -406,7 +406,7 @@ static uint8_t renderer_register_frame_matrix(const float matrix[16]) {
     }
 
     if (frame_matrix_count < RENDERER_MAX_FRAME_MATRICES) {
-        const uint8_t matrix_index = frame_matrix_count++;
+        const Uint8 matrix_index = frame_matrix_count++;
         SDL_memcpy(frame_matrices[matrix_index], matrix, sizeof(float) * 16U);
         return matrix_index;
     }
@@ -481,7 +481,7 @@ static void renderer_bind_sprite_pipeline(SDL_GPURenderPass *const pass,
                                           SDL_GPUTexture *const texture,
                                           SDL_GPUTexture *const overlay_texture) {
     SDL_BindGPUGraphicsPipeline(pass, sprite_pipeline);
-    SDL_GPUTextureSamplerBinding bindings[2] = {
+    const SDL_GPUTextureSamplerBinding bindings[2] = {
         {.texture = texture, .sampler = sampler},
         {.texture = overlay_texture ? overlay_texture : default_overlay_texture, .sampler = sampler},
     };
@@ -572,14 +572,14 @@ static void renderer_draw_world_pass(SDL_GPUCommandBuffer *const cmd) {
     renderer_count_pass_end();
 }
 
-static void renderer_draw_ui_pass(SDL_GPUCommandBuffer *cmd) {
+static void renderer_draw_ui_pass(SDL_GPUCommandBuffer *const cmd) {
     const SDL_GPUColorTargetInfo color_target = {
         .texture = swapchain_texture,
         .load_op = SDL_GPU_LOADOP_LOAD,
         .store_op = SDL_GPU_STOREOP_STORE,
     };
 
-    SDL_GPURenderPass *const pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, NULL);
+    SDL_GPURenderPass *const pass = SDL_BeginGPURenderPass(cmd, &color_target, 1, nullptr);
     renderer_count_pass_begin();
     g_frame_stats.passes.ui_passes++;
     renderer_set_full_swapchain_viewport(pass);
@@ -710,7 +710,7 @@ bool Renderer_Init(SDL_Window *const window, const RendererConfig *const config)
         return false;
     }
 
-    gpu_device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV, true, NULL);
+    gpu_device = SDL_CreateGPUDevice(SDL_GPU_SHADERFORMAT_MSL | SDL_GPU_SHADERFORMAT_SPIRV, true, nullptr);
     if (!gpu_device) {
         SDL_LogError(SDL_LOG_CATEGORY_GPU, "Failed to create SDL_GPU device: %s", SDL_GetError());
         return false;
@@ -965,7 +965,7 @@ bool Renderer_Init(SDL_Window *const window, const RendererConfig *const config)
         return false;
     }
 
-    const uint8_t transparent_overlay[4] = {0, 0, 0, 0};
+    constexpr uint8_t transparent_overlay[4] = {0, 0, 0, 0};
     default_overlay_texture = Renderer_CreateRGBA8Texture(1, 1, transparent_overlay);
     if (!default_overlay_texture) {
         SDL_LogError(SDL_LOG_CATEGORY_GPU, "Failed to create default sprite overlay texture");
