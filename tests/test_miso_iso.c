@@ -238,8 +238,84 @@ static int run_tile_scene_placement_case(void) {
         return failf("failed to pick placed tile object");
     }
 
+    const MisoTileMoveQuery move_query = {
+        .object_id = object_id,
+        .tile_x = 5,
+        .tile_y = 2,
+        .required_tile_flags = MISO_TILE_FLAG_BUILDABLE,
+        .forbidden_tile_flags = MISO_TILE_FLAG_WATER,
+        .blocked_occupancy_mask = MISO_TILE_OCCUPANCY_OBJECT,
+    };
+    if (miso_tile_scene_move_object(scene, tilemap, &move_query, nullptr) != MISO_OK) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("failed to move tile object");
+    }
+
+    if (miso_tile_scene_check_placement(scene, tilemap, &query) != MISO_TILE_PLACE_OK) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("expected move to clear previous footprint occupancy");
+    }
+
+    MisoTilePlacementQuery moved_query = query;
+    moved_query.tile_x = 5;
+    moved_query.tile_y = 2;
+    moved_query.required_adjacent_tile_flags = MISO_TILE_FLAG_NONE;
+    if ((miso_tile_scene_check_placement(scene, tilemap, &moved_query) & MISO_TILE_PLACE_OCCUPIED) == 0) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("expected move to occupy destination footprint");
+    }
+
+    picked_id = 0;
+    if (!miso_tile_scene_pick_object_at_tile(scene, 6, 3, &picked_id) || picked_id != object_id) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("failed to pick moved tile object");
+    }
+
+    MisoTileObjectId blocker_id = 0;
+    const MisoTileObjectDesc blocker = {
+        .type_id = 8,
+        .tile_x = 8,
+        .tile_y = 2,
+        .footprint = {.width = 1, .height = 1, .anchor_x = 0, .anchor_y = 0},
+        .visual_id = 3,
+        .occupancy_mask = MISO_TILE_OCCUPANCY_OBJECT,
+        .pickable = true,
+    };
+    if (miso_tile_scene_place_object(scene, tilemap, &blocker, &blocker_id) != MISO_OK || blocker_id == 0) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("failed to place move blocker");
+    }
+
+    MisoTileMoveResult blocked_move = {0};
+    const MisoTileMoveQuery blocked_move_query = {
+        .object_id = object_id,
+        .tile_x = 7,
+        .tile_y = 2,
+        .required_tile_flags = MISO_TILE_FLAG_BUILDABLE,
+        .forbidden_tile_flags = MISO_TILE_FLAG_WATER,
+        .blocked_occupancy_mask = MISO_TILE_OCCUPANCY_OBJECT,
+    };
+    if (miso_tile_scene_move_object(scene, tilemap, &blocked_move_query, &blocked_move) == MISO_OK ||
+        (blocked_move.problems & MISO_TILE_PLACE_OCCUPIED) == 0) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("expected blocked move to fail with occupancy");
+    }
+
+    picked_id = 0;
+    if (!miso_tile_scene_pick_object_at_tile(scene, 6, 3, &picked_id) || picked_id != object_id) {
+        miso_tilemap_destroy(tilemap);
+        miso_tile_scene_destroy(scene);
+        return failf("expected failed move to restore source occupancy");
+    }
+
     if (miso_tile_scene_remove_object(scene, object_id) != MISO_OK ||
-        miso_tile_scene_check_placement(scene, tilemap, &query) != MISO_TILE_PLACE_OK) {
+        miso_tile_scene_check_placement(scene, tilemap, &moved_query) != MISO_TILE_PLACE_OK) {
         miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("failed to remove object and clear occupancy");
