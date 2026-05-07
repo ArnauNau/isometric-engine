@@ -37,9 +37,6 @@ endfunction()
 
 set(MISO_CORE_SOURCES
     engine/src/miso_profiler.c
-    ecs/entity.c
-    ecs/sparse_set.c
-    ecs/ecs.c
     renderer/renderer.c
     renderer/ui.c
     engine/src/internal/miso__renderer_backend.c
