@@ -21,7 +21,7 @@
 #define MAP_SIZE_X 70
 #define MAP_SIZE_Y 50
 #define MAX_BUILDINGS 512
-#define MAX_AGENTS 8192
+#define MAX_AGENTS 131072
 #define TESTBED_HUD_TEXT_COUNT 4
 
 typedef enum TileType_ {
@@ -170,6 +170,10 @@ const char *testbed_agent_mode_name(const TestbedAgentMode mode) {
     switch (mode) {
     case TESTBED_AGENT_MODE_STATIC:
         return "static";
+    case TESTBED_AGENT_MODE_MOVE:
+        return "move";
+    case TESTBED_AGENT_MODE_MOVE_NO_DRAW:
+        return "move-no-draw";
     case TESTBED_AGENT_MODE_LEGACY_MOVE:
         return "legacy-move";
     case TESTBED_AGENT_MODE_LEGACY_MOVE_NO_DRAW:
@@ -179,6 +183,14 @@ const char *testbed_agent_mode_name(const TestbedAgentMode mode) {
     default:
         return "unknown";
     }
+}
+
+static bool testbed_agent_mode_no_draw(const TestbedAgentMode mode) {
+    return mode == TESTBED_AGENT_MODE_MOVE_NO_DRAW || mode == TESTBED_AGENT_MODE_LEGACY_MOVE_NO_DRAW;
+}
+
+static bool testbed_agent_mode_uses_legacy_movement(const TestbedAgentMode mode) {
+    return mode == TESTBED_AGENT_MODE_LEGACY_MOVE || mode == TESTBED_AGENT_MODE_LEGACY_MOVE_NO_DRAW;
 }
 
 static float testbed_elapsed_ms(const Uint64 start, const Uint64 end) {
@@ -391,10 +403,10 @@ static void testbed_apply_benchmark_camera_preset(TestbedGame *const game) {
 
 static bool testbed_should_render_world(const TestbedGame *const game) {
     if (!game || !game->benchmark_mode) {
-        return game ? game->agent_mode != TESTBED_AGENT_MODE_LEGACY_MOVE_NO_DRAW : true;
+        return game ? !testbed_agent_mode_no_draw(game->agent_mode) : true;
     }
 
-    if (game->agent_mode == TESTBED_AGENT_MODE_LEGACY_MOVE_NO_DRAW) {
+    if (testbed_agent_mode_no_draw(game->agent_mode)) {
         return false;
     }
 
@@ -428,7 +440,7 @@ static bool testbed_should_render_wire(const TestbedGame *const game) {
     if (!game) {
         return false;
     }
-    if (game->agent_mode == TESTBED_AGENT_MODE_LEGACY_MOVE_NO_DRAW) {
+    if (testbed_agent_mode_no_draw(game->agent_mode)) {
         return false;
     }
     if (!game->benchmark_mode) {
@@ -1057,22 +1069,40 @@ static void testbed_agent_try_step(TestbedGame *const game, TestbedAgent *const 
         return;
     }
 
-    MisoTileObjectId new_object_id = 0;
     const Uint64 api_start = SDL_GetPerformanceCounter();
-    const MisoResult remove_result = miso_tile_scene_remove_object(game->tile_scene, agent->object_id);
-    if (remove_result == MISO_OK) {
-        if (testbed_place_boat_object(game, next_x, next_y, (Uint64)(agent_index + 1), &new_object_id)) {
+    if (!testbed_agent_mode_uses_legacy_movement(game->agent_mode)) {
+        const MisoTileMoveQuery move_query = {
+            .object_id = agent->object_id,
+            .tile_x = next_x,
+            .tile_y = next_y,
+            .required_tile_flags = MISO_TILE_FLAG_WATER,
+            .forbidden_tile_flags = MISO_TILE_FLAG_BLOCKS_AGENTS,
+            .blocked_occupancy_mask = MISO_TILE_OCCUPANCY_OBJECT | MISO_TILE_OCCUPANCY_AGENT,
+        };
+        if (miso_tile_scene_move_object(game->tile_scene, game->tilemap, &move_query, nullptr) == MISO_OK) {
             game->agent_metrics.movement_api_ms += testbed_elapsed_ms(api_start, SDL_GetPerformanceCounter());
             agent->x = next_x;
             agent->y = next_y;
-            agent->object_id = new_object_id;
             game->agent_metrics.move_successes++;
             return;
         }
+    } else {
+        MisoTileObjectId new_object_id = 0;
+        const MisoResult remove_result = miso_tile_scene_remove_object(game->tile_scene, agent->object_id);
+        if (remove_result == MISO_OK) {
+            if (testbed_place_boat_object(game, next_x, next_y, (Uint64)(agent_index + 1), &new_object_id)) {
+                game->agent_metrics.movement_api_ms += testbed_elapsed_ms(api_start, SDL_GetPerformanceCounter());
+                agent->x = next_x;
+                agent->y = next_y;
+                agent->object_id = new_object_id;
+                game->agent_metrics.move_successes++;
+                return;
+            }
 
-        (void)testbed_place_boat_object(game, agent->x, agent->y, (Uint64)(agent_index + 1), &new_object_id);
-        if (new_object_id != 0) {
-            agent->object_id = new_object_id;
+            (void)testbed_place_boat_object(game, agent->x, agent->y, (Uint64)(agent_index + 1), &new_object_id);
+            if (new_object_id != 0) {
+                agent->object_id = new_object_id;
+            }
         }
     }
 
@@ -1510,7 +1540,7 @@ static void testbed_populate_demo_map(const TestbedGame *const game) {
             int tile_index = (i % 2) ? 0 : 36;
             uint32_t flags = MISO_TILE_FLAG_NONE;
 
-            if (i > (desc->width_tiles * desc->height_tiles) - (desc->width_tiles / 2) * (desc->height_tiles / 2)) {
+            if (i > (desc->width_tiles * 10)) {
                 tile_index = TILE_PLACEHOLDER_SEA;
                 flags = MISO_TILE_FLAG_WATER;
             }

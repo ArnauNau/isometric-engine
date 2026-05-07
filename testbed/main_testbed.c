@@ -187,8 +187,8 @@ typedef struct BenchBaselineComparison {
 
 static volatile sig_atomic_t g_bench_abort_requested = 0;
 
-static void bench_signal_handler(int signo) {
-    (void)signo;
+static void bench_signal_handler(int signol) {
+    (void)signol;
     g_bench_abort_requested = 1;
 }
 
@@ -314,6 +314,14 @@ static bool bench_parse_agent_mode(const char *const value, TestbedAgentMode *co
         *out_agent_mode = TESTBED_AGENT_MODE_STATIC;
         return true;
     }
+    if (SDL_strcasecmp(value, "move") == 0) {
+        *out_agent_mode = TESTBED_AGENT_MODE_MOVE;
+        return true;
+    }
+    if (SDL_strcasecmp(value, "move-no-draw") == 0) {
+        *out_agent_mode = TESTBED_AGENT_MODE_MOVE_NO_DRAW;
+        return true;
+    }
     if (SDL_strcasecmp(value, "legacy-move") == 0) {
         *out_agent_mode = TESTBED_AGENT_MODE_LEGACY_MOVE;
         return true;
@@ -365,7 +373,7 @@ static bool bench_parse_float(const char *const value, float *const out_value) {
         return false;
     }
 
-    char *end = NULL;
+    char *end = nullptr;
     const float parsed = strtof(value, &end);
     if (end == value || *end != '\0') {
         return false;
@@ -387,7 +395,7 @@ static void bench_print_usage(const char *const argv0) {
     SDL_Log("  --wireframe <on|off>          Enable or disable wireframe");
     SDL_Log("  --spawn-profile <profile>     baseline|stress");
     SDL_Log("  --spawn-count <count>         Explicit spawn count override");
-    SDL_Log("  --agent-mode <mode>           static|legacy-move|legacy-move-no-draw|render-only");
+    SDL_Log("  --agent-mode <mode>           static|move|move-no-draw|legacy-move|legacy-move-no-draw|render-only");
     SDL_Log("  --map-size <n>                Square map size in tiles for benchmark runs (1-%d)", BENCH_MAX_MAP_SIZE);
     SDL_Log("  --diagnostic <mode>           default|world-only|ui-only|wire-only|no-draw|upload-suppressed");
     SDL_Log("  --debug-ui <on|off>           Enable or disable debug UI rendering in benchmark runs");
@@ -525,7 +533,7 @@ static bool bench_parse_cli_options(const int argc, const char *const *const arg
             if (i + 1 >= argc || !bench_parse_agent_mode(argv[++i], &options.agent_mode)) {
                 SDL_LogError(SDL_LOG_CATEGORY_APPLICATION,
                              "Invalid --agent-mode value. Expected: "
-                             "static|legacy-move|legacy-move-no-draw|render-only");
+                             "static|move|move-no-draw|legacy-move|legacy-move-no-draw|render-only");
                 return false;
             }
             continue;
@@ -1619,8 +1627,8 @@ static bool bench_collect_suite_scenarios(const BenchCliOptions *const options,
         const bool wire_options[] = {false, true};
         constexpr TestbedAgentMode agent_modes[] = {
             TESTBED_AGENT_MODE_STATIC,
-            TESTBED_AGENT_MODE_LEGACY_MOVE,
-            TESTBED_AGENT_MODE_LEGACY_MOVE_NO_DRAW,
+            TESTBED_AGENT_MODE_MOVE,
+            TESTBED_AGENT_MODE_MOVE_NO_DRAW,
             TESTBED_AGENT_MODE_RENDER_ONLY,
         };
 
