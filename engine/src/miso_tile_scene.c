@@ -5,6 +5,8 @@
 
 #include <SDL3/SDL.h>
 
+#define MISO_TILE_OBJECT_INDEX_INVALID SDL_MAX_UINT32
+
 typedef struct MisoTileObjectRecord {
     Uint64 game_ref;
     MisoTileFootprint footprint;
@@ -37,9 +39,11 @@ struct MisoTileScene {
     Uint32 visual_capacity;
     Uint32 object_render_capacity;
     MisoTileObjectId next_object_id;
+    Uint32 object_index_capacity;
     MisoEngine *engine;
     MisoTileOccupancyMask *occupancy;
     MisoTileObjectRecord *objects;
+    Uint32 *object_indices_by_id;
     MisoTileObjectVisualRecord *visuals;
     MisoSpriteInstance *object_render_cache;
     MisoTileSceneStats stats;
@@ -197,6 +201,54 @@ static bool miso__tile_scene_ensure_object_capacity(MisoTileScene *const scene) 
     return true;
 }
 
+static bool miso__tile_scene_ensure_object_index_capacity(MisoTileScene *const scene,
+                                                          const MisoTileObjectId object_id) {
+    if (!scene || object_id == 0) {
+        return false;
+    }
+    if (object_id < scene->object_index_capacity) {
+        return true;
+    }
+
+    Uint32 new_capacity = scene->object_index_capacity == 0 ? 64U : scene->object_index_capacity;
+    while (new_capacity <= object_id) {
+        new_capacity *= 2U;
+    }
+
+    Uint32 *const new_indices = SDL_realloc(scene->object_indices_by_id, sizeof(Uint32) * new_capacity);
+    if (!new_indices) {
+        return false;
+    }
+
+    SDL_memset4(new_indices + scene->object_index_capacity,
+                MISO_TILE_OBJECT_INDEX_INVALID,
+                new_capacity - scene->object_index_capacity);
+    scene->object_indices_by_id = new_indices;
+    scene->object_index_capacity = new_capacity;
+    return true;
+}
+
+static MisoTileObjectRecord *
+miso__tile_scene_find_object(MisoTileScene *const scene, const MisoTileObjectId object_id, Uint32 *const out_index) {
+    if (!scene || object_id == 0 || object_id >= scene->object_index_capacity || !scene->object_indices_by_id) {
+        return nullptr;
+    }
+
+    const Uint32 index = scene->object_indices_by_id[object_id];
+    if (index == MISO_TILE_OBJECT_INDEX_INVALID || index >= scene->object_count) {
+        return nullptr;
+    }
+
+    MisoTileObjectRecord *const record = &scene->objects[index];
+    if (!record->active || record->id != object_id) {
+        return nullptr;
+    }
+    if (out_index) {
+        *out_index = index;
+    }
+    return record;
+}
+
 static bool miso__tile_scene_ensure_visual_capacity(MisoTileScene *const scene) {
     if (scene->visual_count < scene->visual_capacity) {
         return true;
@@ -349,6 +401,75 @@ static bool miso__tilemap_footprint_occupiable(const MisoTileScene *const scene,
     return miso__tilemap_footprint_has_terrain(scene, tilemap, min_x, min_y, max_x, max_y);
 }
 
+static void miso__tile_scene_apply_footprint_occupancy(MisoTileScene *const scene,
+                                                       const int tile_x,
+                                                       const int tile_y,
+                                                       const MisoTileFootprint *const footprint,
+                                                       const MisoTileOccupancyMask mask,
+                                                       const bool occupied) {
+    int min_x = 0;
+    int min_y = 0;
+    int max_x = 0;
+    int max_y = 0;
+    miso__tile_footprint_bounds(tile_x, tile_y, footprint, &min_x, &min_y, &max_x, &max_y);
+    for (int y = min_y; y <= max_y; y++) {
+        for (int x = min_x; x <= max_x; x++) {
+            const size_t idx = miso__tile_scene_index(scene, x, y);
+            if (occupied) {
+                scene->occupancy[idx] |= mask;
+            } else {
+                scene->occupancy[idx] &= (Uint8)~mask;
+            }
+        }
+    }
+}
+
+static MisoTilePlacementProblem miso__tile_scene_check_footprint(const MisoTileScene *const scene,
+                                                                 const MisoTilemap *const tilemap,
+                                                                 const int tile_x,
+                                                                 const int tile_y,
+                                                                 const MisoTileFootprint *const footprint,
+                                                                 const MisoTileFlags required_tile_flags,
+                                                                 const MisoTileFlags forbidden_tile_flags,
+                                                                 const MisoTileOccupancyMask occupied_mask) {
+    if (!scene || !tilemap || tilemap->scene != scene || !miso__tile_footprint_valid(footprint)) {
+        return MISO_TILE_PLACE_INVALID_ARGUMENT;
+    }
+
+    int min_x = 0;
+    int min_y = 0;
+    int max_x = 0;
+    int max_y = 0;
+    miso__tile_footprint_bounds(tile_x, tile_y, footprint, &min_x, &min_y, &max_x, &max_y);
+
+    MisoTilePlacementProblem result = MISO_TILE_PLACE_OK;
+    for (int y = min_y; y <= max_y; y++) {
+        for (int x = min_x; x <= max_x; x++) {
+            if (!miso__tile_scene_in_bounds(scene, x, y)) {
+                result |= MISO_TILE_PLACE_OUT_OF_BOUNDS;
+                continue;
+            }
+
+            const size_t idx = miso__tile_scene_index(scene, x, y);
+            if (tilemap->tiles[idx] == MISO_TILE_EMPTY) {
+                result |= MISO_TILE_PLACE_MISSING_TERRAIN;
+                continue;
+            }
+            if (occupied_mask != 0 && (scene->occupancy[idx] & occupied_mask) != 0) {
+                result |= MISO_TILE_PLACE_OCCUPIED;
+            }
+            if (required_tile_flags != 0 && (tilemap->flags[idx] & required_tile_flags) != required_tile_flags) {
+                result |= MISO_TILE_PLACE_MISSING_REQUIRED_FLAGS;
+            }
+            if (forbidden_tile_flags != 0 && (tilemap->flags[idx] & forbidden_tile_flags) != 0) {
+                result |= MISO_TILE_PLACE_HAS_FORBIDDEN_FLAGS;
+            }
+        }
+    }
+
+    return result;
+}
+
 static bool miso__tile_overlay_sync_gpu(MisoTileOverlay *const overlay) {
     if (!overlay || !overlay->scene || !overlay->rgba8) {
         return false;
@@ -448,6 +569,7 @@ void miso_tile_scene_destroy(MisoTileScene *const scene) {
     }
 
     SDL_free(scene->objects);
+    SDL_free(scene->object_indices_by_id);
     SDL_free(scene->visuals);
     SDL_free(scene->object_render_cache);
     SDL_free(scene->occupancy);
@@ -679,31 +801,14 @@ MisoTilePlacementProblem miso_tile_scene_check_placement(const MisoTileScene *co
     int max_y = 0;
     miso__tile_footprint_bounds(query->tile_x, query->tile_y, &query->footprint, &min_x, &min_y, &max_x, &max_y);
 
-    MisoTilePlacementProblem result = MISO_TILE_PLACE_OK;
-    for (int y = min_y; y <= max_y; y++) {
-        for (int x = min_x; x <= max_x; x++) {
-            if (!miso__tile_scene_in_bounds(scene, x, y)) {
-                result |= MISO_TILE_PLACE_OUT_OF_BOUNDS;
-                continue;
-            }
-
-            const size_t idx = miso__tile_scene_index(scene, x, y);
-            if (tilemap->tiles[idx] == MISO_TILE_EMPTY) {
-                result |= MISO_TILE_PLACE_MISSING_TERRAIN;
-                continue;
-            }
-            if (query->occupied_mask != 0 && (scene->occupancy[idx] & query->occupied_mask) != 0) {
-                result |= MISO_TILE_PLACE_OCCUPIED;
-            }
-            if (query->required_tile_flags != 0 &&
-                (tilemap->flags[idx] & query->required_tile_flags) != query->required_tile_flags) {
-                result |= MISO_TILE_PLACE_MISSING_REQUIRED_FLAGS;
-            }
-            if (query->forbidden_tile_flags != 0 && (tilemap->flags[idx] & query->forbidden_tile_flags) != 0) {
-                result |= MISO_TILE_PLACE_HAS_FORBIDDEN_FLAGS;
-            }
-        }
-    }
+    MisoTilePlacementProblem result = miso__tile_scene_check_footprint(scene,
+                                                                       tilemap,
+                                                                       query->tile_x,
+                                                                       query->tile_y,
+                                                                       &query->footprint,
+                                                                       query->required_tile_flags,
+                                                                       query->forbidden_tile_flags,
+                                                                       query->occupied_mask);
 
     if ((result & MISO_TILE_PLACE_OUT_OF_BOUNDS) == 0 &&
         !miso__tile_scene_has_adjacent_flags(
@@ -739,10 +844,12 @@ MisoResult miso_tile_scene_place_object(MisoTileScene *const scene,
         return MISO_ERR_INVALID_ARG;
     }
 
-    if (!miso__tile_scene_ensure_object_capacity(scene)) {
+    if (!miso__tile_scene_ensure_object_capacity(scene) ||
+        !miso__tile_scene_ensure_object_index_capacity(scene, scene->next_object_id)) {
         return MISO_ERR_OUT_OF_MEMORY;
     }
 
+    const Uint32 object_index = scene->object_count;
     MisoTileObjectRecord *const record = &scene->objects[scene->object_count++];
     record->id = scene->next_object_id++;
     record->type_id = desc->type_id;
@@ -755,17 +862,9 @@ MisoResult miso_tile_scene_place_object(MisoTileScene *const scene,
     record->game_ref = desc->game_ref;
     record->active = true;
     scene->active_object_count++;
-
-    int min_x = 0;
-    int min_y = 0;
-    int max_x = 0;
-    int max_y = 0;
-    miso__tile_footprint_bounds(desc->tile_x, desc->tile_y, &desc->footprint, &min_x, &min_y, &max_x, &max_y);
-    for (int y = min_y; y <= max_y; y++) {
-        for (int x = min_x; x <= max_x; x++) {
-            scene->occupancy[miso__tile_scene_index(scene, x, y)] |= record->occupancy_mask;
-        }
-    }
+    scene->object_indices_by_id[record->id] = object_index;
+    miso__tile_scene_apply_footprint_occupancy(
+        scene, desc->tile_x, desc->tile_y, &desc->footprint, record->occupancy_mask, true);
 
     if (out_id) {
         *out_id = record->id;
@@ -782,32 +881,93 @@ MisoResult miso_tile_scene_remove_object(MisoTileScene *const scene, const MisoT
         return MISO_ERR_INVALID_ARG;
     }
 
-    for (Uint32 i = 0; i < scene->object_count; i++) {
-        scene->stats.remove_scan_steps++;
-        MisoTileObjectRecord *const record = &scene->objects[i];
-        if (!record->active || record->id != object_id) {
-            continue;
-        }
+    Uint32 object_index = MISO_TILE_OBJECT_INDEX_INVALID;
+    MisoTileObjectRecord *const record = miso__tile_scene_find_object(scene, object_id, &object_index);
+    if (!record) {
+        return MISO_ERR_NOT_FOUND;
+    }
 
-        int min_x = 0;
-        int min_y = 0;
-        int max_x = 0;
-        int max_y = 0;
-        miso__tile_footprint_bounds(record->tile_x, record->tile_y, &record->footprint, &min_x, &min_y, &max_x, &max_y);
-        for (int y = min_y; y <= max_y; y++) {
-            for (int x = min_x; x <= max_x; x++) {
-                scene->occupancy[miso__tile_scene_index(scene, x, y)] &= (Uint8)~record->occupancy_mask;
-            }
-        }
+    miso__tile_scene_apply_footprint_occupancy(
+        scene, record->tile_x, record->tile_y, &record->footprint, record->occupancy_mask, false);
 
-        record->active = false;
-        if (scene->active_object_count > 0U) {
-            scene->active_object_count--;
+    const Uint32 last_index = scene->object_count - 1U;
+    scene->object_indices_by_id[object_id] = MISO_TILE_OBJECT_INDEX_INVALID;
+    if (object_index != last_index) {
+        scene->objects[object_index] = scene->objects[last_index];
+        scene->object_indices_by_id[scene->objects[object_index].id] = object_index;
+    }
+    SDL_memset(&scene->objects[last_index], 0, sizeof(scene->objects[last_index]));
+    scene->object_count--;
+    scene->active_object_count = scene->object_count;
+    return MISO_OK;
+}
+
+MisoResult miso_tile_scene_move_object(MisoTileScene *const scene,
+                                       const MisoTilemap *const tilemap,
+                                       const MisoTileMoveQuery *const query,
+                                       MisoTileMoveResult *const out_result) {
+    if (out_result) {
+        *out_result = (MisoTileMoveResult){0};
+    }
+    if (scene) {
+        scene->stats.move_calls++;
+    }
+    if (!scene || !tilemap || tilemap->scene != scene || !query || query->object_id == 0) {
+        if (out_result) {
+            out_result->problems = MISO_TILE_PLACE_INVALID_ARGUMENT;
         }
+        if (scene) {
+            scene->stats.move_failures++;
+        }
+        return MISO_ERR_INVALID_ARG;
+    }
+
+    MisoTileObjectRecord *const record = miso__tile_scene_find_object(scene, query->object_id, nullptr);
+    if (!record) {
+        if (out_result) {
+            out_result->problems = MISO_TILE_PLACE_INVALID_ARGUMENT;
+        }
+        scene->stats.move_failures++;
+        return MISO_ERR_NOT_FOUND;
+    }
+
+    if (record->tile_x == query->tile_x && record->tile_y == query->tile_y) {
+        scene->stats.move_successes++;
         return MISO_OK;
     }
 
-    return MISO_ERR_NOT_FOUND;
+    const MisoTileOccupancyMask blocked_occupancy_mask =
+        query->blocked_occupancy_mask != 0 ? query->blocked_occupancy_mask : record->occupancy_mask;
+
+    miso__tile_scene_apply_footprint_occupancy(
+        scene, record->tile_x, record->tile_y, &record->footprint, record->occupancy_mask, false);
+    const MisoTilePlacementProblem problems = miso__tile_scene_check_footprint(scene,
+                                                                               tilemap,
+                                                                               query->tile_x,
+                                                                               query->tile_y,
+                                                                               &record->footprint,
+                                                                               query->required_tile_flags,
+                                                                               query->forbidden_tile_flags,
+                                                                               blocked_occupancy_mask);
+    if (problems != MISO_TILE_PLACE_OK) {
+        miso__tile_scene_apply_footprint_occupancy(
+            scene, record->tile_x, record->tile_y, &record->footprint, record->occupancy_mask, true);
+        if (out_result) {
+            out_result->problems = problems;
+        }
+        scene->stats.move_failures++;
+        return MISO_ERR_INVALID_ARG;
+    }
+
+    record->tile_x = query->tile_x;
+    record->tile_y = query->tile_y;
+    miso__tile_scene_apply_footprint_occupancy(
+        scene, record->tile_x, record->tile_y, &record->footprint, record->occupancy_mask, true);
+    if (out_result) {
+        out_result->problems = MISO_TILE_PLACE_OK;
+    }
+    scene->stats.move_successes++;
+    return MISO_OK;
 }
 
 void miso_tile_scene_clear_objects(MisoTileScene *const scene) {
@@ -818,6 +978,9 @@ void miso_tile_scene_clear_objects(MisoTileScene *const scene) {
     SDL_memset(scene->occupancy, 0, miso__tile_scene_tile_count(scene) * sizeof(Uint8));
     if (scene->objects) {
         SDL_memset(scene->objects, 0, sizeof(MisoTileObjectRecord) * scene->object_capacity);
+    }
+    if (scene->object_indices_by_id) {
+        SDL_memset4(scene->object_indices_by_id, MISO_TILE_OBJECT_INDEX_INVALID, scene->object_index_capacity);
     }
     scene->object_count = 0;
     scene->active_object_count = 0;

@@ -125,6 +125,19 @@ typedef struct MisoTileObjectInfo {
     bool pickable;
 } MisoTileObjectInfo;
 
+typedef struct MisoTileMoveQuery {
+    MisoTileObjectId object_id;
+    int tile_x;
+    int tile_y;
+    MisoTileFlags required_tile_flags;
+    MisoTileFlags forbidden_tile_flags;
+    MisoTileOccupancyMask blocked_occupancy_mask;
+} MisoTileMoveQuery;
+
+typedef struct MisoTileMoveResult {
+    MisoTilePlacementProblem problems;
+} MisoTileMoveResult;
+
 typedef struct MisoTileSceneStats {
     Uint32 active_object_count;
     Uint32 object_storage_count;
@@ -132,6 +145,9 @@ typedef struct MisoTileSceneStats {
     Uint64 place_calls;
     Uint64 remove_calls;
     Uint64 remove_scan_steps;
+    Uint64 move_calls;
+    Uint64 move_successes;
+    Uint64 move_failures;
 } MisoTileSceneStats;
 
 /**
@@ -255,6 +271,10 @@ MisoResult miso_tile_scene_place_object(MisoTileScene *scene,
                                         const MisoTileObjectDesc *desc,
                                         MisoTileObjectId *out_id);
 MisoResult miso_tile_scene_remove_object(MisoTileScene *scene, MisoTileObjectId object_id);
+MisoResult miso_tile_scene_move_object(MisoTileScene *scene,
+                                       const MisoTilemap *tilemap,
+                                       const MisoTileMoveQuery *query,
+                                       MisoTileMoveResult *out_result);
 void miso_tile_scene_clear_objects(MisoTileScene *scene);
 bool miso_tile_scene_pick_object_at_tile(const MisoTileScene *scene, int tx, int ty, MisoTileObjectId *out_id);
 bool miso_tile_scene_pick_object_at_screen(const MisoTileScene *scene,
