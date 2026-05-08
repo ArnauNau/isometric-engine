@@ -4,7 +4,7 @@
 #include "miso_engine.h"
 #include "miso_render.h"
 
-typedef uint32_t MisoTextHandle;
+typedef Uint32 MisoTextHandle;
 
 typedef struct MisoTextMetrics {
     float width;
@@ -12,11 +12,13 @@ typedef struct MisoTextMetrics {
 } MisoTextMetrics;
 
 /**
- * Creates a persistent UI text object from a loaded font.
+ * Creates a retained UI text object from a loaded font.
  *
- * Persistent text avoids recreating SDL_ttf text objects every frame and keeps
- * cached metrics. \p initial_text may be NULL, which creates an empty string.
- * Text handle 0 is invalid.
+ * Retained text is the normal path for labels, HUD values, buttons, overlays,
+ * and other UI text that has identity across frames, whether it changes rarely
+ * or every frame. The handle owns one SDL_ttf text object and keeps cached
+ * metrics. \p initial_text may be NULL, which creates an empty string. Text
+ * handle 0 is invalid.
  *
  * \param engine Engine whose renderer/text engine is active.
  * \param font Font handle to use.
@@ -28,7 +30,7 @@ MisoResult
 miso_text_create(const MisoEngine *engine, MisoFontHandle font, const char *initial_text, MisoTextHandle *out_text);
 
 /**
- * Destroys a persistent text handle.
+ * Destroys a retained text handle.
  *
  * Invalid handles are ignored. Text handles are also destroyed automatically
  * when their source font is destroyed or the renderer shuts down.
@@ -48,10 +50,11 @@ void miso_text_destroy(const MisoEngine *engine, MisoTextHandle text);
 bool miso_text_is_valid(const MisoEngine *engine, MisoTextHandle text);
 
 /**
- * Replaces a persistent text object's string.
+ * Replaces a retained text object's string.
  *
- * Passing NULL is treated as an empty string. Metrics are refreshed on success.
- * Invalid handles return MISO_ERR_NOT_FOUND.
+ * Passing NULL is treated as an empty string. Passing the same string is a
+ * cheap no-op; layout and cached metrics are refreshed only when the string
+ * changes. Invalid handles return MISO_ERR_NOT_FOUND.
  *
  * \param engine Engine whose renderer/text engine is active.
  * \param text Text handle to update.
@@ -61,7 +64,7 @@ bool miso_text_is_valid(const MisoEngine *engine, MisoTextHandle text);
 MisoResult miso_text_set_string(const MisoEngine *engine, MisoTextHandle text, const char *string);
 
 /**
- * Copies cached pixel metrics for a persistent text object.
+ * Copies cached pixel metrics for a retained text object.
  *
  * Returns false for invalid handles or NULL output storage.
  *
@@ -94,10 +97,10 @@ void miso_text_set_background_enabled(const MisoEngine *engine, MisoTextHandle t
  * \param rgba8 Background color as 0xRRGGBBAA.
  * \param padding Background padding in pixels.
  */
-void miso_text_set_background_style(const MisoEngine *engine, MisoTextHandle text, uint32_t rgba8, float padding);
+void miso_text_set_background_style(const MisoEngine *engine, MisoTextHandle text, Uint32 rgba8, float padding);
 
 /**
- * Submits a persistent text object in UI pixel coordinates.
+ * Submits a retained text object in UI pixel coordinates.
  *
  * If a background is enabled, it is drawn before the text using the cached text
  * metrics and configured padding. Invalid handles are ignored.
@@ -111,6 +114,6 @@ void miso_text_set_background_style(const MisoEngine *engine, MisoTextHandle tex
  * \param y UI y coordinate in pixels.
  * \param rgba8 Requested text color as 0xRRGGBBAA; currently ignored.
  */
-void miso_render_submit_ui_text_handle(const MisoEngine *engine, MisoTextHandle text, float x, float y, uint32_t rgba8);
+void miso_render_submit_ui_text_handle(const MisoEngine *engine, MisoTextHandle text, float x, float y, Uint32 rgba8);
 
 #endif

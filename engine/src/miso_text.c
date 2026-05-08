@@ -10,16 +10,16 @@
 #define MISO_TEXT_MIN_STRING_CAPACITY 32U
 
 typedef struct MisoTextEntry {
-    bool in_use;
-    MisoFontHandle font;
     TTF_Text *text;
     char *string;
-    uint32_t string_capacity;
+    Uint32 string_capacity;
+    Uint32 background_rgba8;
     float width;
     float height;
-    bool background_enabled;
-    uint32_t background_rgba8;
     float background_padding;
+    MisoFontHandle font;
+    bool background_enabled;
+    bool in_use;
 } MisoTextEntry;
 
 static MisoTextEntry g_text_table[MISO_TEXT_TABLE_MAX] = {0};
@@ -37,7 +37,7 @@ static MisoTextEntry *miso__text_get_entry(const MisoTextHandle handle) {
         return nullptr;
     }
 
-    MisoTextEntry *entry = &g_text_table[handle];
+    MisoTextEntry *const entry = &g_text_table[handle];
     return entry->in_use ? entry : nullptr;
 }
 
@@ -73,7 +73,7 @@ static bool miso__text_ensure_capacity(MisoTextEntry *const entry, const size_t 
         new_capacity *= 2U;
     }
 
-    char *new_buffer = SDL_realloc(entry->string, (size_t)new_capacity);
+    char *const new_buffer = SDL_realloc(entry->string, (size_t)new_capacity);
     if (!new_buffer) {
         return false;
     }
@@ -128,12 +128,12 @@ MisoResult miso_text_create(const MisoEngine *const engine,
         return MISO_ERR_INVALID_ARG;
     }
 
-    TTF_Font *font_ptr = miso__render_get_font_ptr(font);
+    TTF_Font *const font_ptr = miso__render_get_font_ptr(font);
     if (!font_ptr) {
         return MISO_ERR_NOT_FOUND;
     }
 
-    TTF_TextEngine *text_engine = miso__renderer_get_text_engine();
+    TTF_TextEngine *const text_engine = miso__renderer_get_text_engine();
     if (!text_engine) {
         return MISO_ERR_GPU;
     }
@@ -144,7 +144,7 @@ MisoResult miso_text_create(const MisoEngine *const engine,
             continue;
         }
 
-        TTF_Text *text = TTF_CreateText(text_engine, font_ptr, "", 0);
+        TTF_Text *const text = TTF_CreateText(text_engine, font_ptr, "", 0);
         if (!text) {
             return MISO_ERR_GPU;
         }
@@ -182,7 +182,7 @@ bool miso_text_is_valid(const MisoEngine *const engine, const MisoTextHandle tex
 MisoResult miso_text_set_string(const MisoEngine *const engine, const MisoTextHandle text, const char *const string) {
     (void)engine;
 
-    MisoTextEntry *entry = miso__text_get_entry(text);
+    MisoTextEntry *const entry = miso__text_get_entry(text);
     if (!entry) {
         return MISO_ERR_NOT_FOUND;
     }
@@ -195,7 +195,7 @@ bool miso_text_get_metrics(const MisoEngine *const engine,
                            MisoTextMetrics *const out_metrics) {
     (void)engine;
 
-    MisoTextEntry *entry = miso__text_get_entry(text);
+    MisoTextEntry *const entry = miso__text_get_entry(text);
     if (!entry || !out_metrics) {
         return false;
     }
@@ -208,7 +208,7 @@ bool miso_text_get_metrics(const MisoEngine *const engine,
 void miso_text_set_background_enabled(const MisoEngine *const engine, const MisoTextHandle text, const bool enabled) {
     (void)engine;
 
-    MisoTextEntry *entry = miso__text_get_entry(text);
+    MisoTextEntry *const entry = miso__text_get_entry(text);
     if (!entry) {
         return;
     }
@@ -218,11 +218,11 @@ void miso_text_set_background_enabled(const MisoEngine *const engine, const Miso
 
 void miso_text_set_background_style(const MisoEngine *const engine,
                                     const MisoTextHandle text,
-                                    const uint32_t rgba8,
+                                    const Uint32 rgba8,
                                     const float padding) {
     (void)engine;
 
-    MisoTextEntry *entry = miso__text_get_entry(text);
+    MisoTextEntry *const entry = miso__text_get_entry(text);
     if (!entry) {
         return;
     }
@@ -232,11 +232,11 @@ void miso_text_set_background_style(const MisoEngine *const engine,
 }
 
 void miso_render_submit_ui_text_handle(
-    const MisoEngine *const engine, const MisoTextHandle text, const float x, const float y, const uint32_t rgba8) {
+    const MisoEngine *const engine, const MisoTextHandle text, const float x, const float y, const Uint32 rgba8) {
     (void)engine;
     (void)rgba8;
 
-    MisoTextEntry *entry = miso__text_get_entry(text);
+    MisoTextEntry *const entry = miso__text_get_entry(text);
     if (!entry || !entry->text) {
         return;
     }

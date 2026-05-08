@@ -4,8 +4,8 @@
 #include "miso_camera.h"
 #include "miso_engine.h"
 
-typedef uint32_t MisoTextureHandle;
-typedef uint32_t MisoFontHandle;
+typedef Uint32 MisoTextureHandle;
+typedef Uint16 MisoFontHandle;
 
 /**
  * Describes lightweight metadata for a loaded texture.
@@ -16,9 +16,9 @@ typedef uint32_t MisoFontHandle;
  */
 typedef struct MisoTextureInfo {
     /** Texture width in pixels. */
-    uint32_t width;
+    Uint32 width;
     /** Texture height in pixels. */
-    uint32_t height;
+    Uint32 height;
 } MisoTextureInfo;
 
 typedef struct MisoSpriteInstance {
@@ -233,11 +233,13 @@ void miso_render_begin_ui(const MisoEngine *engine);
 void miso_render_submit_ui_rect(const MisoEngine *engine, float x, float y, float w, float h, uint32_t rgba8);
 
 /**
- * Submits immediate UI text using a font handle.
+ * Submits throwaway immediate UI text using a font handle.
  *
- * Empty strings, NULL strings, and invalid fonts are ignored. The current
- * immediate text path reuses one cached text object per font, so persistent or
- * frequently updated labels should prefer MisoTextHandle APIs.
+ * Empty strings, NULL strings, and invalid fonts are ignored. This convenience
+ * path is intended for quick diagnostics and prototype-only text that does not
+ * have stable identity across frames. It reuses one SDL_ttf text object per
+ * font and replaces that object's string on each submit, so retained UI text
+ * should use the MisoTextHandle APIs in miso_text.h instead.
  *
  * \note The current implementation ignores \p rgba8; text color is controlled
  * by the underlying SDL_ttf text object/default renderer state.
@@ -249,7 +251,7 @@ void miso_render_submit_ui_rect(const MisoEngine *engine, float x, float y, floa
  * \param y UI y coordinate in pixels.
  * \param rgba8 Requested text color as 0xRRGGBBAA; currently ignored.
  */
-void miso_render_submit_ui_text(
+[[deprecated("use miso_text")]] void miso_render_submit_ui_text(
     const MisoEngine *engine, MisoFontHandle font, const char *text, float x, float y, uint32_t rgba8);
 
 /**

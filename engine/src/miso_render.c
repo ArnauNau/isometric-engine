@@ -24,8 +24,8 @@ typedef struct MisoTextureEntry {
      * atlases without exposing SDL_GPUTexture.
      */
     SDL_GPUTexture *texture;
-    uint32_t width;
-    uint32_t height;
+    Uint32 width;
+    Uint32 height;
 } MisoTextureEntry;
 
 static MisoTextureEntry g_texture_table[MISO_TEXTURE_TABLE_MAX] = {0};
@@ -54,7 +54,7 @@ static bool miso__ensure_world_geometry_scratch(const int vertex_count) {
         new_capacity *= 2;
     }
 
-    SDL_Vertex *new_scratch = SDL_realloc(g_world_geometry_scratch, sizeof(SDL_Vertex) * (size_t)new_capacity);
+    SDL_Vertex *const new_scratch = SDL_realloc(g_world_geometry_scratch, sizeof(SDL_Vertex) * (size_t)new_capacity);
     if (!new_scratch) {
         return false;
     }
@@ -72,9 +72,9 @@ miso_render_load_texture(const MisoEngine *const engine, const char *const path,
         return MISO_ERR_INVALID_ARG;
     }
 
-    uint32_t width = 0;
-    uint32_t height = 0;
-    SDL_GPUTexture *texture = miso__renderer_load_texture(path, &width, &height);
+    Uint32 width = 0;
+    Uint32 height = 0;
+    SDL_GPUTexture *const texture = miso__renderer_load_texture(path, &width, &height);
     if (!texture) {
         return MISO_ERR_IO;
     }
@@ -147,23 +147,23 @@ MisoResult miso_render_load_font(const MisoEngine *const engine,
         return MISO_ERR_INVALID_ARG;
     }
 
-    TTF_TextEngine *text_engine = miso__renderer_get_text_engine();
+    TTF_TextEngine *const text_engine = miso__renderer_get_text_engine();
     if (!text_engine) {
         return MISO_ERR_GPU;
     }
 
-    TTF_Font *font = TTF_OpenFont(path, point_size);
+    TTF_Font *const font = TTF_OpenFont(path, point_size);
     if (!font) {
         return MISO_ERR_IO;
     }
 
-    TTF_Text *text = TTF_CreateText(text_engine, font, "", 0);
+    TTF_Text *const text = TTF_CreateText(text_engine, font, "", 0);
     if (!text) {
         TTF_CloseFont(font);
         return MISO_ERR_GPU;
     }
 
-    for (uint32_t i = 1; i < MISO_FONT_TABLE_MAX; i++) {
+    for (MisoFontHandle i = 1; i < MISO_FONT_TABLE_MAX; i++) {
         if (!g_font_table[i].font) {
             g_font_table[i].font = font;
             g_font_table[i].text = text;
