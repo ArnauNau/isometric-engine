@@ -298,7 +298,9 @@ bool miso_debug_ui_feed_event(const MisoEvent *const event) {
         break;
     }
     case MISO_EVENT_MOUSE_WHEEL:
-        nk_input_scroll(context, (struct nk_vec2){event->data.mouse_wheel.x, event->data.mouse_wheel.y});
+        if (nk_item_is_any_active(context) || nk_window_is_any_hovered(context)) {
+            nk_input_scroll(context, (struct nk_vec2){event->data.mouse_wheel.x, event->data.mouse_wheel.y});
+        }
         break;
     case MISO_EVENT_KEY:
         miso_debug_ui_feed_key(context, &event->data.key);

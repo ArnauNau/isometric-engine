@@ -46,9 +46,11 @@ void miso_debug_ui_end_input(void);
 /**
  * Feeds a converted MisoEvent into Nuklear.
  *
- * Mouse coordinates are scaled by the current window pixel density. The return
- * value indicates whether Nuklear currently has active or hovered UI and is
- * useful for deciding whether gameplay should consume the same input.
+ * Mouse coordinates are scaled by the current window pixel density. Mouse wheel
+ * deltas are only forwarded to Nuklear when UI is active or hovered, so gameplay
+ * may use a false return value for world zoom. The return value indicates
+ * whether Nuklear currently has active or hovered UI and is useful for deciding
+ * whether gameplay should consume the same input.
  *
  * \param event Event to feed.
  * \return true if Nuklear has active or hovered UI after processing.
