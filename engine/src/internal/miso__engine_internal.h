@@ -27,8 +27,8 @@ struct MisoEngine {
     char data_root[MISO_PATH_MAX];
     bool has_data_root;
 
-    uint64_t perf_frequency;
-    uint64_t last_counter;
+    Uint64 perf_frequency;
+    Uint64 last_counter;
     float real_dt_seconds;
     double sim_accumulator;
 
@@ -37,8 +37,8 @@ struct MisoEngine {
     bool game_registered;
 
     MisoCameraState *cameras;
-    uint32_t camera_capacity;
-    uint32_t camera_count;
+    Uint32 camera_capacity;
+    Uint32 camera_count;
 
     MisoProfilerState *profiler;
 

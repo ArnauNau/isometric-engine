@@ -5,6 +5,9 @@
 
 #include <SDL3/SDL.h>
 
+#define MIN_ZOOM 0.5f
+#define MAX_ZOOM 20.0f
+
 static void
 miso__resolve_normalized_viewport(MisoCameraState *const camera, const int pixel_width, const int pixel_height) {
     if (!camera || pixel_width <= 0 || pixel_height <= 0) {
@@ -33,7 +36,7 @@ void miso__camera_resolve_normalized_viewports(MisoEngine *const engine,
     if (!engine) {
         return;
     }
-    for (uint32_t i = 0; i < engine->camera_count; i++) {
+    for (Uint32 i = 0; i < engine->camera_count; i++) {
         MisoCameraState *const camera = &engine->cameras[i];
         if (camera->used && camera->viewport_normalized) {
             miso__resolve_normalized_viewport(camera, pixel_width, pixel_height);
@@ -86,8 +89,8 @@ void miso_camera_set_viewport_normalized(MisoEngine *engine,
     miso__resolve_normalized_viewport(camera, engine->config.window_width, engine->config.window_height);
 }
 
-void miso_camera_set_position(MisoEngine *engine, MisoCameraId camera_id, float x, float y) {
-    MisoCameraState *camera = miso__camera_get_mut(engine, camera_id);
+void miso_camera_set_position(MisoEngine *const engine, const MisoCameraId camera_id, const float x, const float y) {
+    MisoCameraState *const camera = miso__camera_get_mut(engine, camera_id);
     if (!camera) {
         return;
     }
@@ -95,22 +98,25 @@ void miso_camera_set_position(MisoEngine *engine, MisoCameraId camera_id, float 
     camera->y = y;
 }
 
-void miso_camera_set_zoom(MisoEngine *engine, MisoCameraId camera_id, float zoom) {
-    MisoCameraState *camera = miso__camera_get_mut(engine, camera_id);
+void miso_camera_set_zoom(MisoEngine *const engine, const MisoCameraId camera_id, float zoom) {
+    MisoCameraState *const camera = miso__camera_get_mut(engine, camera_id);
     if (!camera) {
         return;
     }
-    if (zoom < 0.5f) {
-        zoom = 0.5f;
+    if (zoom < MIN_ZOOM) {
+        zoom = MIN_ZOOM;
     }
-    if (zoom > 5.0f) {
-        zoom = 5.0f;
+    if (zoom > MAX_ZOOM) {
+        zoom = MAX_ZOOM;
     }
     camera->zoom = zoom;
 }
 
-void miso_camera_pan(MisoEngine *engine, MisoCameraId camera_id, float dx_world, float dy_world) {
-    MisoCameraState *camera = miso__camera_get_mut(engine, camera_id);
+void miso_camera_pan(MisoEngine *const engine,
+                     const MisoCameraId camera_id,
+                     const float dx_world,
+                     const float dy_world) {
+    MisoCameraState *const camera = miso__camera_get_mut(engine, camera_id);
     if (!camera) {
         return;
     }
@@ -128,11 +134,11 @@ void miso_camera_zoom_at_screen(
     const float prev_zoom = camera->zoom;
     const float zoom_step = wheel_delta > 0.0f ? 1.1f : 0.9f;
     float new_zoom = prev_zoom * zoom_step;
-    if (new_zoom < 0.5f) {
-        new_zoom = 0.5f;
+    if (new_zoom < MIN_ZOOM) {
+        new_zoom = MIN_ZOOM;
     }
-    if (new_zoom > 5.0f) {
-        new_zoom = 5.0f;
+    if (new_zoom > MAX_ZOOM) {
+        new_zoom = MAX_ZOOM;
     }
 
     const float cx = (float)camera->viewport.x + (float)camera->viewport.w * 0.5f;
@@ -180,7 +186,7 @@ miso_camera_screen_to_world(const MisoEngine *const engine, const MisoCameraId c
 
 MisoVec2
 miso_camera_world_to_screen(const MisoEngine *engine, const MisoCameraId camera_id, const float wx, const float wy) {
-    const MisoCameraState *camera = miso__camera_get(engine, camera_id);
+    const MisoCameraState *const camera = miso__camera_get(engine, camera_id);
     if (!camera) {
         return (MisoVec2){0.0f, 0.0f};
     }
