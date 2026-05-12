@@ -44,15 +44,11 @@ set(MISO_CORE_SOURCES
     engine/src/miso_events.c
     engine/src/miso_camera.c
     engine/src/miso_iso.c
-    engine/src/miso_world.c
-    engine/src/miso_tile_scene.c
-    engine/src/miso_buildings.c
+        engine/src/miso_tile_scene.c
     engine/src/miso_render.c
     engine/src/miso_render_diagnostics.c
     engine/src/miso_text.c
     engine/src/miso_debug_ui.c
-    engine/src/miso_save.c
-    engine/src/miso_replay.c
     engine/src/internal/miso__paths.c
 )
 
