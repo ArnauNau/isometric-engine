@@ -7,6 +7,20 @@
 
 #define MISO_TILE_OBJECT_INDEX_INVALID SDL_MAX_UINT32
 
+typedef struct MisoTileSpriteVisual {
+    MisoTextureHandle texture;
+    Uint16 atlas_columns;
+    Uint16 atlas_rows;
+    Uint16 atlas_cell_w_px;
+    Uint16 atlas_cell_h_px;
+    Uint16 source_w_cells;
+    Uint16 source_h_cells;
+    Uint16 render_w_px;
+    Uint16 render_h_px;
+    Sint16 origin_x_px;
+    Sint16 origin_y_px;
+} MisoTileSpriteVisual;
+
 typedef struct MisoTileObjectRecord {
     Uint64 game_ref;
     MisoTileFootprint footprint;
@@ -22,12 +36,8 @@ typedef struct MisoTileObjectRecord {
 
 typedef struct MisoTileObjectVisualRecord {
     MisoTileVisualId visual_id;
-    MisoTextureHandle texture;
-    Uint16 atlas_columns;
-    Uint16 atlas_rows;
+    MisoTileSpriteVisual sprite;
     Uint32 atlas_tile_id;
-    int sprite_w_tiles;
-    int sprite_h_tiles;
 } MisoTileObjectVisualRecord;
 
 struct MisoTileScene {
@@ -38,6 +48,10 @@ struct MisoTileScene {
     Uint32 visual_count;
     Uint32 visual_capacity;
     Uint32 object_render_capacity;
+    Uint32 terrain_layer_count;
+    Uint32 terrain_layer_capacity;
+    Uint32 overlay_count;
+    Uint32 overlay_capacity;
     MisoTileObjectId next_object_id;
     Uint32 object_index_capacity;
     MisoEngine *engine;
@@ -46,13 +60,13 @@ struct MisoTileScene {
     Uint32 *object_indices_by_id;
     MisoTileObjectVisualRecord *visuals;
     MisoSpriteInstance *object_render_cache;
+    MisoTilemap **terrain_layers;
+    MisoTileOverlay **overlays;
     MisoTileSceneStats stats;
 };
 
 struct MisoTilemap {
-    MisoTextureHandle texture;
-    Uint16 atlas_columns;
-    Uint16 atlas_rows;
+    MisoTileSpriteVisual terrain_sprite;
     Uint32 render_cache_count;
     float tint_overlay_strength;
     bool cache_dirty;
@@ -70,6 +84,9 @@ struct MisoTileOverlay {
     bool dirty;
 };
 
+static void miso__tilemap_destroy(MisoTilemap *tilemap);
+static void miso__tile_overlay_destroy(MisoTileOverlay *overlay);
+
 static bool miso__tile_scene_valid_desc(const MisoTileSceneDesc *const desc) {
     return desc && desc->map.width_tiles > 0 && desc->map.height_tiles > 0 && desc->map.tile_w_px > 0 &&
            desc->map.tile_h_px > 0;
@@ -77,6 +94,8 @@ static bool miso__tile_scene_valid_desc(const MisoTileSceneDesc *const desc) {
 
 static bool miso__tile_scene_resolve_atlas_grid(const MisoTileScene *const scene,
                                                 const MisoTextureHandle texture,
+                                                const Uint16 atlas_cell_w_px,
+                                                const Uint16 atlas_cell_h_px,
                                                 const Uint16 requested_columns,
                                                 const Uint16 requested_rows,
                                                 Uint16 *const out_columns,
@@ -91,7 +110,9 @@ static bool miso__tile_scene_resolve_atlas_grid(const MisoTileScene *const scene
         return true;
     }
 
-    if (scene->map.tile_w_px <= 0 || scene->map.tile_h_px <= 0) {
+    const Uint32 tile_w = atlas_cell_w_px > 0 ? atlas_cell_w_px : (Uint16)scene->map.tile_w_px;
+    const Uint32 tile_h = atlas_cell_h_px > 0 ? atlas_cell_h_px : (Uint16)scene->map.tile_h_px;
+    if (tile_w == 0U || tile_h == 0U) {
         return false;
     }
 
@@ -104,14 +125,12 @@ static bool miso__tile_scene_resolve_atlas_grid(const MisoTileScene *const scene
     Uint32 columns = requested_columns;
     Uint32 rows = requested_rows;
     if (columns == 0) {
-        const Uint32 tile_w = (Uint32)scene->map.tile_w_px;
         if (texture_info.width % tile_w != 0U) {
             return false;
         }
         columns = texture_info.width / tile_w;
     }
     if (rows == 0) {
-        const Uint32 tile_h = (Uint32)scene->map.tile_h_px;
         if (texture_info.height % tile_h != 0U) {
             return false;
         }
@@ -125,6 +144,73 @@ static bool miso__tile_scene_resolve_atlas_grid(const MisoTileScene *const scene
     *out_columns = (Uint16)columns;
     *out_rows = (Uint16)rows;
     return true;
+}
+
+static bool miso__tile_scene_resolve_sprite_visual(const MisoTileScene *const scene,
+                                                   const MisoTileSpriteDesc *const desc,
+                                                   MisoTileSpriteVisual *const out_visual) {
+    if (!scene || !desc || !out_visual || desc->atlas.texture == 0) {
+        return false;
+    }
+
+    const Uint16 cell_w = desc->atlas.cell_w_px > 0 ? desc->atlas.cell_w_px : (Uint16)scene->map.tile_w_px;
+    const Uint16 cell_h = desc->atlas.cell_h_px > 0 ? desc->atlas.cell_h_px : (Uint16)scene->map.tile_h_px;
+    if (cell_w == 0 || cell_h == 0) {
+        return false;
+    }
+
+    Uint16 atlas_columns = 0;
+    Uint16 atlas_rows = 0;
+    if (!miso__tile_scene_resolve_atlas_grid(scene,
+                                             desc->atlas.texture,
+                                             cell_w,
+                                             cell_h,
+                                             desc->atlas.columns,
+                                             desc->atlas.rows,
+                                             &atlas_columns,
+                                             &atlas_rows)) {
+        return false;
+    }
+
+    const Uint16 source_w_cells = desc->source_w_cells > 0 ? desc->source_w_cells : 1U;
+    const Uint16 source_h_cells = desc->source_h_cells > 0 ? desc->source_h_cells : 1U;
+    const Uint32 source_w_px = (Uint32)cell_w * source_w_cells;
+    const Uint32 source_h_px = (Uint32)cell_h * source_h_cells;
+    if (source_w_px > SDL_MAX_UINT16 || source_h_px > SDL_MAX_UINT16) {
+        return false;
+    }
+    const Uint16 render_w = desc->render_w_px > 0 ? desc->render_w_px : (Uint16)source_w_px;
+    const Uint16 render_h = desc->render_h_px > 0 ? desc->render_h_px : (Uint16)source_h_px;
+    if (render_w == 0 || render_h == 0) {
+        return false;
+    }
+
+    *out_visual = (MisoTileSpriteVisual){
+        .texture = desc->atlas.texture,
+        .atlas_columns = atlas_columns,
+        .atlas_rows = atlas_rows,
+        .atlas_cell_w_px = cell_w,
+        .atlas_cell_h_px = cell_h,
+        .source_w_cells = source_w_cells,
+        .source_h_cells = source_h_cells,
+        .render_w_px = render_w,
+        .render_h_px = render_h,
+        .origin_x_px = desc->origin_x_px,
+        .origin_y_px = desc->origin_y_px,
+    };
+    return true;
+}
+
+static bool miso__tile_sprite_visual_valid_tile_id(const MisoTileSpriteVisual *const visual, const Uint32 tile_id) {
+    if (!visual || visual->atlas_columns == 0 || visual->atlas_rows == 0 || visual->source_w_cells == 0 ||
+        visual->source_h_cells == 0) {
+        return false;
+    }
+
+    const Uint32 col = tile_id % visual->atlas_columns;
+    const Uint32 row = tile_id / visual->atlas_columns;
+    return row < visual->atlas_rows && col + visual->source_w_cells <= visual->atlas_columns &&
+           row + visual->source_h_cells <= visual->atlas_rows;
 }
 
 static size_t miso__tile_scene_tile_count(const MisoTileScene *const scene) {
@@ -147,7 +233,7 @@ static bool miso__tilemap_valid_tile_id(const MisoTilemap *const tilemap, const 
         return true;
     }
 
-    return tile_id < (Uint32)tilemap->atlas_columns * (Uint32)tilemap->atlas_rows;
+    return miso__tile_sprite_visual_valid_tile_id(&tilemap->terrain_sprite, tile_id);
 }
 
 static bool miso__tile_footprint_valid(const MisoTileFootprint *const footprint) {
@@ -287,6 +373,44 @@ static bool miso__tile_scene_ensure_object_render_capacity(MisoTileScene *const 
 
     scene->object_render_cache = new_cache;
     scene->object_render_capacity = new_capacity;
+    return true;
+}
+
+static bool miso__tile_scene_ensure_terrain_layer_capacity(MisoTileScene *const scene) {
+    if (scene->terrain_layer_count < scene->terrain_layer_capacity) {
+        return true;
+    }
+
+    const Uint32 new_capacity = scene->terrain_layer_capacity == 0 ? 2U : scene->terrain_layer_capacity * 2U;
+    MisoTilemap **const new_layers = SDL_realloc(scene->terrain_layers, sizeof(MisoTilemap *) * new_capacity);
+    if (!new_layers) {
+        return false;
+    }
+
+    SDL_memset(new_layers + scene->terrain_layer_capacity,
+               0,
+               sizeof(MisoTilemap *) * (new_capacity - scene->terrain_layer_capacity));
+    scene->terrain_layers = new_layers;
+    scene->terrain_layer_capacity = new_capacity;
+    return true;
+}
+
+static bool miso__tile_scene_ensure_overlay_capacity(MisoTileScene *const scene) {
+    if (scene->overlay_count < scene->overlay_capacity) {
+        return true;
+    }
+
+    const Uint32 new_capacity = scene->overlay_capacity == 0 ? 2U : scene->overlay_capacity * 2U;
+    MisoTileOverlay **const new_overlays = SDL_realloc(scene->overlays, sizeof(MisoTileOverlay *) * new_capacity);
+    if (!new_overlays) {
+        return false;
+    }
+
+    SDL_memset(new_overlays + scene->overlay_capacity,
+               0,
+               sizeof(MisoTileOverlay *) * (new_capacity - scene->overlay_capacity));
+    scene->overlays = new_overlays;
+    scene->overlay_capacity = new_capacity;
     return true;
 }
 
@@ -499,8 +623,15 @@ static void miso__tilemap_rebuild_cache(MisoTilemap *const tilemap, const MisoTi
         return;
     }
 
-    const float tex_w = (float)((Uint32)tilemap->atlas_columns * (Uint32)scene->map.tile_w_px);
-    const float tex_h = (float)((Uint32)tilemap->atlas_rows * (Uint32)scene->map.tile_h_px);
+    const MisoTileSpriteVisual *const visual = &tilemap->terrain_sprite;
+    const float atlas_cell_w = (float)visual->atlas_cell_w_px;
+    const float atlas_cell_h = (float)visual->atlas_cell_h_px;
+    const float source_w = atlas_cell_w * (float)visual->source_w_cells;
+    const float source_h = atlas_cell_h * (float)visual->source_h_cells;
+    const float sprite_w = (float)visual->render_w_px;
+    const float sprite_h = (float)visual->render_h_px;
+    const float tex_w = (float)((Uint32)visual->atlas_columns * (Uint32)visual->atlas_cell_w_px);
+    const float tex_h = (float)((Uint32)visual->atlas_rows * (Uint32)visual->atlas_cell_h_px);
     if (tex_w <= 0.0f || tex_h <= 0.0f) {
         return;
     }
@@ -513,25 +644,27 @@ static void miso__tilemap_rebuild_cache(MisoTilemap *const tilemap, const MisoTi
             if (!miso__tilemap_valid_tile_id(tilemap, tile_id) || tile_id == MISO_TILE_EMPTY) {
                 continue;
             }
-            const Uint32 col = tile_id % tilemap->atlas_columns;
-            const Uint32 row = tile_id / tilemap->atlas_columns;
+            const Uint32 col = tile_id % visual->atlas_columns;
+            const Uint32 row = tile_id / visual->atlas_columns;
             float world_x = 0.0f;
             float world_y = 0.0f;
             miso_iso_tile_to_world(&scene->map, x, y, &world_x, &world_y);
+            world_x -= (float)visual->origin_x_px;
+            world_y -= (float)visual->origin_y_px;
 
             tilemap->render_cache[instance_count++] = (MisoSpriteInstance){
                 .x = world_x,
                 .y = world_y,
                 .z = miso_tile_scene_depth_at_tile(scene, (float)x, (float)y),
                 .flags = (tilemap->flags[idx] & MISO_TILE_FLAG_WATER) ? 1.0f : 0.0f,
-                .w = (float)scene->map.tile_w_px,
-                .h = (float)scene->map.tile_h_px,
+                .w = sprite_w,
+                .h = sprite_h,
                 .tile_x = (float)x,
                 .tile_y = (float)y,
-                .u = ((float)col * (float)scene->map.tile_w_px) / tex_w,
-                .v = ((float)row * (float)scene->map.tile_h_px) / tex_h,
-                .uw = (float)scene->map.tile_w_px / tex_w,
-                .vh = (float)scene->map.tile_h_px / tex_h,
+                .u = ((float)col * atlas_cell_w) / tex_w,
+                .v = ((float)row * atlas_cell_h) / tex_h,
+                .uw = source_w / tex_w,
+                .vh = source_h / tex_h,
             };
         }
     }
@@ -568,10 +701,18 @@ void miso_tile_scene_destroy(MisoTileScene *const scene) {
         return;
     }
 
+    for (Uint32 i = 0; i < scene->overlay_count; i++) {
+        miso__tile_overlay_destroy(scene->overlays[i]);
+    }
+    for (Uint32 i = 0; i < scene->terrain_layer_count; i++) {
+        miso__tilemap_destroy(scene->terrain_layers[i]);
+    }
     SDL_free(scene->objects);
     SDL_free(scene->object_indices_by_id);
     SDL_free(scene->visuals);
     SDL_free(scene->object_render_cache);
+    SDL_free(scene->terrain_layers);
+    SDL_free(scene->overlays);
     SDL_free(scene->occupancy);
     SDL_free(scene);
 }
@@ -580,42 +721,7 @@ const MisoIsoMapDesc *miso_tile_scene_get_desc(const MisoTileScene *const scene)
     return scene ? &scene->map : nullptr;
 }
 
-MisoTilemap *miso_tilemap_create(MisoTileScene *const scene, const MisoTilemapDesc *const desc) {
-    if (!scene || !desc || desc->texture == 0) {
-        return nullptr;
-    }
-
-    Uint16 atlas_columns = 0;
-    Uint16 atlas_rows = 0;
-    if (!miso__tile_scene_resolve_atlas_grid(
-            scene, desc->texture, desc->atlas_columns, desc->atlas_rows, &atlas_columns, &atlas_rows)) {
-        return nullptr;
-    }
-
-    MisoTilemap *const tilemap = SDL_calloc(1, sizeof(MisoTilemap));
-    if (!tilemap) {
-        return nullptr;
-    }
-
-    const size_t tile_count = miso__tile_scene_tile_count(scene);
-    tilemap->tiles = SDL_malloc(tile_count * sizeof(Uint32));
-    tilemap->flags = SDL_calloc(tile_count, sizeof(Uint32));
-    tilemap->render_cache = SDL_calloc(tile_count, sizeof(MisoSpriteInstance));
-    if (!tilemap->tiles || !tilemap->flags || !tilemap->render_cache) {
-        miso_tilemap_destroy(tilemap);
-        return nullptr;
-    }
-    SDL_memset4(tilemap->tiles, MISO_TILE_EMPTY, tile_count);
-
-    tilemap->scene = scene;
-    tilemap->texture = desc->texture;
-    tilemap->atlas_columns = atlas_columns;
-    tilemap->atlas_rows = atlas_rows;
-    tilemap->cache_dirty = true;
-    return tilemap;
-}
-
-void miso_tilemap_destroy(MisoTilemap *const tilemap) {
+static void miso__tilemap_destroy(MisoTilemap *const tilemap) {
     if (!tilemap) {
         return;
     }
@@ -626,8 +732,59 @@ void miso_tilemap_destroy(MisoTilemap *const tilemap) {
     SDL_free(tilemap);
 }
 
-MisoTileOverlay *miso_tile_overlay_create(MisoTileScene *const scene, const MisoTileOverlayDesc *const desc) {
+static void miso__tile_overlay_destroy(MisoTileOverlay *const overlay) {
+    if (!overlay) {
+        return;
+    }
+
+    if (overlay->texture) {
+        miso__renderer_destroy_texture(overlay->texture);
+    }
+    SDL_free(overlay->rgba8);
+    SDL_free(overlay);
+}
+
+MisoTilemap *miso_tile_scene_create_tilemap(MisoTileScene *const scene, const MisoTilemapDesc *const desc) {
+    if (!scene || !desc) {
+        return nullptr;
+    }
+
+    MisoTileSpriteVisual terrain_sprite = {0};
+    if (!miso__tile_scene_resolve_sprite_visual(scene, &desc->terrain_sprite, &terrain_sprite)) {
+        return nullptr;
+    }
+
+    MisoTilemap *const tilemap = SDL_calloc(1, sizeof(MisoTilemap));
+    if (!tilemap) {
+        return nullptr;
+    }
+    if (!miso__tile_scene_ensure_terrain_layer_capacity(scene)) {
+        miso__tilemap_destroy(tilemap);
+        return nullptr;
+    }
+
+    const size_t tile_count = miso__tile_scene_tile_count(scene);
+    tilemap->tiles = SDL_malloc(tile_count * sizeof(Uint32));
+    tilemap->flags = SDL_calloc(tile_count, sizeof(Uint32));
+    tilemap->render_cache = SDL_calloc(tile_count, sizeof(MisoSpriteInstance));
+    if (!tilemap->tiles || !tilemap->flags || !tilemap->render_cache) {
+        miso__tilemap_destroy(tilemap);
+        return nullptr;
+    }
+    SDL_memset4(tilemap->tiles, MISO_TILE_EMPTY, tile_count);
+
+    tilemap->scene = scene;
+    tilemap->terrain_sprite = terrain_sprite;
+    tilemap->cache_dirty = true;
+    scene->terrain_layers[scene->terrain_layer_count++] = tilemap;
+    return tilemap;
+}
+
+MisoTileOverlay *miso_tile_scene_create_overlay(MisoTileScene *const scene, const MisoTileOverlayDesc *const desc) {
     if (!scene) {
+        return nullptr;
+    }
+    if (!miso__tile_scene_ensure_overlay_capacity(scene)) {
         return nullptr;
     }
 
@@ -644,19 +801,8 @@ MisoTileOverlay *miso_tile_overlay_create(MisoTileScene *const scene, const Miso
     }
 
     miso_tile_overlay_clear(overlay, desc ? desc->clear_rgba8 : 0x00000000U);
+    scene->overlays[scene->overlay_count++] = overlay;
     return overlay;
-}
-
-void miso_tile_overlay_destroy(MisoTileOverlay *const overlay) {
-    if (!overlay) {
-        return;
-    }
-
-    if (overlay->texture) {
-        miso__renderer_destroy_texture(overlay->texture);
-    }
-    SDL_free(overlay->rgba8);
-    SDL_free(overlay);
 }
 
 void miso_tile_overlay_clear(MisoTileOverlay *const overlay, const Uint32 rgba8) {
@@ -1081,15 +1227,15 @@ void miso_tile_scene_reset_stats(MisoTileScene *const scene) {
 }
 
 MisoResult miso_tile_scene_set_object_visual(MisoTileScene *const scene, const MisoTileObjectVisualDesc *const desc) {
-    if (!scene || !desc || desc->visual_id == 0 || desc->texture == 0 || desc->sprite_w_tiles <= 0 ||
-        desc->sprite_h_tiles <= 0) {
+    if (!scene || !desc || desc->visual_id == 0) {
         return MISO_ERR_INVALID_ARG;
     }
 
-    Uint16 atlas_columns = 0;
-    Uint16 atlas_rows = 0;
-    if (!miso__tile_scene_resolve_atlas_grid(
-            scene, desc->texture, desc->atlas_columns, desc->atlas_rows, &atlas_columns, &atlas_rows)) {
+    MisoTileSpriteVisual sprite = {0};
+    if (!miso__tile_scene_resolve_sprite_visual(scene, &desc->sprite, &sprite)) {
+        return MISO_ERR_INVALID_ARG;
+    }
+    if (!miso__tile_sprite_visual_valid_tile_id(&sprite, desc->atlas_tile_id)) {
         return MISO_ERR_INVALID_ARG;
     }
 
@@ -1103,12 +1249,8 @@ MisoResult miso_tile_scene_set_object_visual(MisoTileScene *const scene, const M
 
     *visual = (MisoTileObjectVisualRecord){
         .visual_id = desc->visual_id,
-        .texture = desc->texture,
-        .atlas_columns = atlas_columns,
-        .atlas_rows = atlas_rows,
+        .sprite = sprite,
         .atlas_tile_id = desc->atlas_tile_id,
-        .sprite_w_tiles = desc->sprite_w_tiles,
-        .sprite_h_tiles = desc->sprite_h_tiles,
     };
     return MISO_OK;
 }
@@ -1121,13 +1263,9 @@ void miso_tile_scene_render_objects(const MisoEngine *const engine,
         return;
     }
 
-    const float tile_w = (float)scene->map.tile_w_px;
-    const float tile_h = (float)scene->map.tile_h_px;
-    const float iso_w = tile_w;
-    const float iso_h = tile_h * 0.5f;
+    const float iso_w = (float)scene->map.tile_w_px;
+    const float iso_h = (float)scene->map.tile_h_px * 0.5f;
     const float start_x = (float)(scene->map.height_tiles - 1) * iso_w * 0.5f;
-    const float texel_w = tile_w;
-    const float texel_h = tile_h;
 
     miso_render_begin_world(engine, camera_id);
 
@@ -1145,24 +1283,29 @@ void miso_tile_scene_render_objects(const MisoEngine *const engine,
             continue;
         }
 
-        if (active_texture != 0 && active_texture != visual->texture && instance_count > 0) {
+        const MisoTileSpriteVisual *const sprite = &visual->sprite;
+        if (active_texture != 0 && active_texture != sprite->texture && instance_count > 0) {
             miso_render_submit_sprites(engine, active_texture, scene->object_render_cache, (int)instance_count);
             instance_count = 0;
         }
-        active_texture = visual->texture;
+        active_texture = sprite->texture;
 
-        const Uint32 col = visual->atlas_tile_id % visual->atlas_columns;
-        const Uint32 row = visual->atlas_tile_id / visual->atlas_columns;
-        const float tex_w = (float)((Uint32)visual->atlas_columns * (Uint32)scene->map.tile_w_px);
-        const float tex_h = (float)((Uint32)visual->atlas_rows * (Uint32)scene->map.tile_h_px);
-        const float sprite_w = (float)visual->sprite_w_tiles * tile_w;
-        const float sprite_h = (float)visual->sprite_h_tiles * tile_h;
+        const Uint32 col = visual->atlas_tile_id % sprite->atlas_columns;
+        const Uint32 row = visual->atlas_tile_id / sprite->atlas_columns;
+        const float atlas_cell_w = (float)sprite->atlas_cell_w_px;
+        const float atlas_cell_h = (float)sprite->atlas_cell_h_px;
+        const float source_w = atlas_cell_w * (float)sprite->source_w_cells;
+        const float source_h = atlas_cell_h * (float)sprite->source_h_cells;
+        const float tex_w = (float)((Uint32)sprite->atlas_columns * (Uint32)sprite->atlas_cell_w_px);
+        const float tex_h = (float)((Uint32)sprite->atlas_rows * (Uint32)sprite->atlas_cell_h_px);
+        const float sprite_w = (float)sprite->render_w_px;
+        const float sprite_h = (float)sprite->render_h_px;
 
         float world_x = start_x + (float)(object->tile_x - object->tile_y) * (iso_w * 0.5f);
         float world_y = (float)(object->tile_x + object->tile_y) * (iso_h * 0.5f);
-        world_y -= tile_h;
-        world_y -= (float)visual->sprite_h_tiles * iso_h;
         world_x -= (float)(object->footprint.width - 1) * 0.5f * iso_w;
+        world_x -= (float)sprite->origin_x_px;
+        world_y -= (float)sprite->origin_y_px;
 
         scene->object_render_cache[instance_count++] = (MisoSpriteInstance){
             .x = world_x,
@@ -1173,10 +1316,10 @@ void miso_tile_scene_render_objects(const MisoEngine *const engine,
             .h = sprite_h,
             .tile_x = (float)object->tile_x,
             .tile_y = (float)object->tile_y,
-            .u = ((float)col * texel_w) / tex_w,
-            .v = ((float)row * texel_h) / tex_h,
-            .uw = sprite_w / tex_w,
-            .vh = sprite_h / tex_h,
+            .u = ((float)col * atlas_cell_w) / tex_w,
+            .v = ((float)row * atlas_cell_h) / tex_h,
+            .uw = source_w / tex_w,
+            .vh = source_h / tex_h,
         };
     }
 
@@ -1228,10 +1371,10 @@ float miso_tile_scene_depth_at_tile(const MisoTileScene *const scene, const floa
     return 1.0f - (tile_x + tile_y) / (float)(scene->map.width_tiles + scene->map.height_tiles);
 }
 
-void miso_tilemap_render(const MisoEngine *const engine,
-                         MisoTilemap *const tilemap,
-                         const MisoTileScene *const scene,
-                         const MisoCameraId camera_id) {
+static void miso__tilemap_render_layer(const MisoEngine *const engine,
+                                       MisoTilemap *const tilemap,
+                                       const MisoTileScene *const scene,
+                                       const MisoCameraId camera_id) {
     if (!engine || !tilemap || !scene || tilemap->scene != scene) {
         return;
     }
@@ -1254,7 +1397,20 @@ void miso_tilemap_render(const MisoEngine *const engine,
                                                scene->map.height_tiles,
                                                tilemap->tint_overlay_strength);
     }
-    miso_render_submit_sprites(engine, tilemap->texture, tilemap->render_cache, (int)tilemap->render_cache_count);
+    miso_render_submit_sprites(
+        engine, tilemap->terrain_sprite.texture, tilemap->render_cache, (int)tilemap->render_cache_count);
     miso__renderer_set_sprite_tint_overlay(nullptr, 0, 0, 0.0f);
     miso_render_end_world(engine);
+}
+
+void miso_tile_scene_render_terrain(const MisoEngine *const engine,
+                                    MisoTileScene *const scene,
+                                    const MisoCameraId camera_id) {
+    if (!engine || !scene) {
+        return;
+    }
+
+    for (Uint32 i = 0; i < scene->terrain_layer_count; i++) {
+        miso__tilemap_render_layer(engine, scene->terrain_layers[i], scene, camera_id);
+    }
 }

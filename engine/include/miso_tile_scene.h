@@ -59,25 +59,77 @@ typedef enum MisoTilePlacementProblem : MisoTilePlacementProblemMask {
 } MisoTilePlacementProblem;
 
 typedef struct MisoTileSceneDesc {
+    /**
+     * Logical world tile grid used for isometric projection, picking, depth,
+     * placement, and occupancy. Visual sprites may use different atlas cells
+     * and render dimensions.
+     */
     MisoIsoMapDesc map;
 } MisoTileSceneDesc;
 
 /**
- * Tilemap creation data.
+ * Describes a regular texture atlas grid.
  *
- * The texture must be a valid MisoTextureHandle. Atlas columns and rows may be
- * supplied explicitly, or set to 0 to derive the missing value from the loaded
- * texture dimensions and the scene tile pixel size. Derivation requires exact
- * divisibility; atlases with padding, spacing, margins, or uneven cells should
- * pass explicit atlas dimensions until a richer atlas resource format exists.
+ * The texture must be a valid MisoTextureHandle. Cell dimensions may be set to
+ * 0 to use the scene's logical world tile dimensions. Columns and rows may be
+ * supplied explicitly, or set to 0 to derive the missing value from loaded
+ * texture metadata and cell dimensions. Derivation requires exact divisibility;
+ * atlases with padding, spacing, margins, or uneven cells should pass explicit
+ * atlas dimensions until a richer atlas resource format exists.
+ */
+typedef struct MisoAtlasGridDesc {
+    /** Loaded texture handle containing the atlas. */
+    MisoTextureHandle texture;
+    /** Atlas column count, or 0 to derive from texture width and cell width. */
+    Uint16 columns;
+    /** Atlas row count, or 0 to derive from texture height and cell height. */
+    Uint16 rows;
+    /** Atlas source cell width in pixels, or 0 to use scene logical tile width. */
+    Uint16 cell_w_px;
+    /** Atlas source cell height in pixels, or 0 to use scene logical tile height. */
+    Uint16 cell_h_px;
+} MisoAtlasGridDesc;
+
+/**
+ * Visual sprite contract for terrain cells and tile objects.
+ *
+ * The atlas fields describe the regular source grid. Source span selects how
+ * many atlas cells the sprite samples from that grid, starting at its tile id;
+ * a 2x3 object sprite in a 32px atlas grid should set source span to 2x3.
+ * Render dimensions describe the world-space quad submitted to the renderer.
+ * The origin is the pixel offset from the submitted sprite's top-left corner to
+ * the tile anchor point. For terrain top faces, this is usually {0, 0}. For
+ * tall objects, set the origin so the object's anchor tile stays stable while
+ * the sprite extends up or left from it.
+ */
+typedef struct MisoTileSpriteDesc {
+    /** Source atlas grid. */
+    MisoAtlasGridDesc atlas;
+    /** Source width in atlas cells, or 0 to sample one atlas cell. */
+    Uint16 source_w_cells;
+    /** Source height in atlas cells, or 0 to sample one atlas cell. */
+    Uint16 source_h_cells;
+    /** Rendered sprite width in world pixels, or 0 to use source region width. */
+    Uint16 render_w_px;
+    /** Rendered sprite height in world pixels, or 0 to use source region height. */
+    Uint16 render_h_px;
+    /** Horizontal pixel offset from sprite top-left to tile anchor point. */
+    Sint16 origin_x_px;
+    /** Vertical pixel offset from sprite top-left to tile anchor point. */
+    Sint16 origin_y_px;
+} MisoTileSpriteDesc;
+
+/**
+ * Terrain layer creation data.
+ *
+ * A tilemap is a scene-owned terrain layer: it stores per-cell terrain ids,
+ * terrain flags, terrain render cache data, and an optional terrain tint
+ * overlay. Dynamic objects and agents are also owned by MisoTileScene, but use
+ * separate object storage so terrain-specific data stays compact.
  */
 typedef struct MisoTilemapDesc {
-    /** Loaded texture handle containing the tile atlas. */
-    MisoTextureHandle texture;
-    /** Atlas column count, or 0 to derive from texture width and scene tile width. */
-    Uint16 atlas_columns;
-    /** Atlas row count, or 0 to derive from texture height and scene tile height. */
-    Uint16 atlas_rows;
+    /** Terrain cell visual used for every non-empty terrain tile id. */
+    MisoTileSpriteDesc terrain_sprite;
 } MisoTilemapDesc;
 
 typedef struct MisoTileOverlayDesc {
@@ -153,26 +205,19 @@ typedef struct MisoTileSceneStats {
 /**
  * Visual definition for tile objects rendered by the tile scene.
  *
- * The visual references a texture atlas tile by id. Atlas columns/rows follow
- * the same convention as MisoTilemapDesc: provide explicit values for custom
- * atlas layouts, or set either value to 0 for grid derivation from texture
- * dimensions and scene tile size.
+ * The visual references a source region by atlas tile id and a sprite visual
+ * contract. The atlas tile id is the region's top-left cell; source span must
+ * fit within the atlas row/column bounds. Visual size is independent from
+ * occupancy footprint: footprint is grid collision/picking state, while sprite
+ * describes what is drawn.
  */
 typedef struct MisoTileObjectVisualDesc {
     /** Visual id referenced by MisoTileObjectDesc::visual_id. */
     MisoTileVisualId visual_id;
-    /** Loaded texture handle containing the visual atlas. */
-    MisoTextureHandle texture;
-    /** Atlas column count, or 0 to derive from texture width and scene tile width. */
-    Uint16 atlas_columns;
-    /** Atlas row count, or 0 to derive from texture height and scene tile height. */
-    Uint16 atlas_rows;
-    /** Atlas tile id used as the visual's top-left source tile. */
+    /** Sprite visual used by objects with this visual id. */
+    MisoTileSpriteDesc sprite;
+    /** Atlas tile id used as the visual source region's top-left cell. */
     Uint32 atlas_tile_id;
-    /** Visual width in tile units. */
-    int sprite_w_tiles;
-    /** Visual height in tile units. */
-    int sprite_h_tiles;
 } MisoTileObjectVisualDesc;
 
 MisoTileScene *miso_tile_scene_create(MisoEngine *engine, const MisoTileSceneDesc *desc);
@@ -180,22 +225,24 @@ void miso_tile_scene_destroy(MisoTileScene *scene);
 const MisoIsoMapDesc *miso_tile_scene_get_desc(const MisoTileScene *scene);
 
 /**
- * Creates a tilemap owned by the caller and associated with a tile scene.
+ * Creates a terrain tilemap owned by the scene.
  *
  * The tilemap stores tile ids, generic tile flags, render cache data, and an
- * optional tint overlay reference. It does not own the texture handle. If atlas
- * columns or rows are 0, they are derived from the texture metadata retained by
- * miso_render_load_texture().
+ * optional tint overlay reference. Callers may keep the returned handle to
+ * mutate/query the terrain layer, but must not destroy it; miso_tile_scene_destroy()
+ * releases all scene-owned tilemaps. The tilemap does not own texture handles.
+ * If atlas columns or rows are 0, they are derived from the texture metadata
+ * retained by miso_render_load_texture() and the terrain sprite atlas cell
+ * dimensions.
  *
  * Returns NULL when arguments are invalid, texture metadata is unavailable, or
- * derived atlas dimensions do not divide evenly by the scene tile size.
+ * derived atlas dimensions do not divide evenly by the atlas cell size.
  *
  * \param scene Tile scene that provides map dimensions and tile pixel size.
  * \param desc Tilemap creation data.
  * \return New tilemap, or NULL on failure.
  */
-MisoTilemap *miso_tilemap_create(MisoTileScene *scene, const MisoTilemapDesc *desc);
-void miso_tilemap_destroy(MisoTilemap *tilemap);
+MisoTilemap *miso_tile_scene_create_tilemap(MisoTileScene *scene, const MisoTilemapDesc *desc);
 
 /**
  * Sets one tile id and marks the tilemap render cache dirty.
@@ -232,18 +279,19 @@ void miso_tilemap_fill(MisoTilemap *tilemap, Uint32 tile_id, MisoTileFlags flags
 void miso_tilemap_clear(MisoTilemap *tilemap);
 
 /**
- * Creates an RGBA8 per-tile overlay buffer for a scene.
+ * Creates a scene-owned RGBA8 per-tile overlay buffer.
  *
  * Overlay data is CPU-owned by the engine and uploaded lazily when rendered as
  * a tilemap tint overlay. Colors use 0xRRGGBBAA. The overlay does not encode
- * game semantics; games decide what each color means.
+ * game semantics; games decide what each color means. Callers may keep the
+ * returned handle to mutate/query the overlay, but must not destroy it;
+ * miso_tile_scene_destroy() releases all scene-owned overlays.
  *
  * \param scene Scene whose tile dimensions define the overlay buffer size.
  * \param desc Overlay creation data.
  * \return New overlay, or NULL on failure.
  */
-MisoTileOverlay *miso_tile_overlay_create(MisoTileScene *scene, const MisoTileOverlayDesc *desc);
-void miso_tile_overlay_destroy(MisoTileOverlay *overlay);
+MisoTileOverlay *miso_tile_scene_create_overlay(MisoTileScene *scene, const MisoTileOverlayDesc *desc);
 void miso_tile_overlay_clear(MisoTileOverlay *overlay, uint32_t rgba8);
 bool miso_tile_overlay_set_tile_rgba8(MisoTileOverlay *overlay, int tx, int ty, Uint32 rgba8);
 Uint32 miso_tile_overlay_get_tile_rgba8(const MisoTileOverlay *overlay, int tx, int ty);
@@ -291,8 +339,9 @@ void miso_tile_scene_reset_stats(MisoTileScene *scene);
  * Registers or replaces a visual definition used by tile objects.
  *
  * This function validates or derives atlas grid dimensions using texture
- * metadata, mirroring miso_tilemap_create(). The texture handle is referenced
- * but not owned by the scene.
+ * metadata, mirroring miso_tile_scene_create_tilemap(). It also validates that
+ * the visual source region fits inside the atlas. Texture handles are
+ * referenced but not owned by the scene.
  *
  * \param scene Scene that owns the visual registry.
  * \param desc Visual definition to register or replace.
@@ -330,20 +379,17 @@ bool miso_tile_scene_world_to_tile(
 float miso_tile_scene_depth_at_tile(const MisoTileScene *scene, float tile_x, float tile_y);
 
 /**
- * Renders tilemap terrain for the scene using the active atlas and render cache.
+ * Renders all scene-owned terrain layers.
  *
- * The render cache is rebuilt only when tile ids or tile flags change, then
- * submitted as sprite instances. If a tint overlay is attached, dirty overlay
- * data is uploaded before drawing and sampled by the terrain shader.
+ * Each layer render cache is rebuilt only when tile ids or tile flags change,
+ * then submitted as sprite instances. If a tint overlay is attached to a layer,
+ * dirty overlay data is uploaded before drawing and sampled by the terrain
+ * shader. Layer order is creation order.
  *
  * \param engine Engine whose renderer is active.
- * \param tilemap Tilemap terrain to render.
- * \param scene Scene that provides map coordinates and tile dimensions.
+ * \param scene Scene that owns terrain layers and coordinate metadata.
  * \param camera_id Camera used for world rendering.
  */
-void miso_tilemap_render(const MisoEngine *engine,
-                         MisoTilemap *tilemap,
-                         const MisoTileScene *scene,
-                         MisoCameraId camera_id);
+void miso_tile_scene_render_terrain(const MisoEngine *engine, MisoTileScene *scene, MisoCameraId camera_id);
 
 #endif

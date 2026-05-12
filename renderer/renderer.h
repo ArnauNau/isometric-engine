@@ -177,7 +177,7 @@ void Renderer_SetViewProjection(const float *viewProjMatrix);
  * @param phase     Phase offset multiplier for tile position (controls wave width).
  *
  * @see SpriteInstance for per-tile water flag.
- * @see miso_tilemap_render() which uses these parameters automatically.
+ * @see miso_tile_scene_render_terrain() which uses these parameters automatically.
  */
 void Renderer_SetWaterParams(float time, float speed, float amplitude, float phase);
 void Renderer_SetSpriteTintOverlay(SDL_GPUTexture *texture, Uint32 width, Uint32 height, float strength);
