@@ -213,8 +213,9 @@ MisoResult miso_debug_ui_init(const MisoEngine *const engine, const char *const 
     const float scaled_font_size = font_size * ui_scale;
 
     struct nk_font_atlas *const atlas = nk_sdl_gpu_font_stash_begin(context);
-    struct nk_font *const font = nk_font_atlas_add_from_file(atlas, font_path, scaled_font_size, nullptr);
+    struct nk_font *font = nk_font_atlas_add_from_file(atlas, font_path, scaled_font_size, nullptr);
     if (!font) {
+        font = nk_font_atlas_add_default(atlas, scaled_font_size, nullptr);
         SDL_Log("miso_debug_ui: failed to load font from %s, using default", font_path ? font_path : "(null)");
     }
 
