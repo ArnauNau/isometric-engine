@@ -350,6 +350,21 @@ void miso_tile_scene_reset_stats(MisoTileScene *scene);
 MisoResult miso_tile_scene_set_object_visual(MisoTileScene *scene, const MisoTileObjectVisualDesc *desc);
 
 /**
+ * Renders scene-owned world content in canonical order.
+ *
+ * This is the ergonomic default for clients that want the tile scene to draw
+ * everything it owns. The current order is terrain layers first, in creation
+ * order, then active tile objects through their registered visuals. More
+ * specific terrain/object render functions remain public for diagnostics,
+ * benchmarks, and custom render ordering.
+ *
+ * \param engine Engine whose renderer is active.
+ * \param scene Tile scene containing terrain layers, objects, and visuals.
+ * \param camera_id Camera used for world rendering.
+ */
+void miso_tile_scene_render(const MisoEngine *engine, MisoTileScene *scene, MisoCameraId camera_id);
+
+/**
  * Renders active tile objects through their registered visuals.
  *
  * Object placement, occupancy, and visual registration are engine-owned; game

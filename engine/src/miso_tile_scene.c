@@ -1414,3 +1414,12 @@ void miso_tile_scene_render_terrain(const MisoEngine *const engine,
         miso__tilemap_render_layer(engine, scene->terrain_layers[i], scene, camera_id);
     }
 }
+
+void miso_tile_scene_render(const MisoEngine *const engine, MisoTileScene *const scene, const MisoCameraId camera_id) {
+    if (!engine || !scene) {
+        return;
+    }
+
+    miso_tile_scene_render_terrain(engine, scene, camera_id);
+    miso_tile_scene_render_objects(engine, scene, camera_id);
+}
