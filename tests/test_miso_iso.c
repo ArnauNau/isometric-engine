@@ -167,18 +167,23 @@ static int run_tile_scene_placement_case(void) {
     }
 
     const MisoTilemapDesc tilemap_desc = {
-        .texture = 1,
-        .atlas_columns = 4,
-        .atlas_rows = 4,
+        .terrain_sprite =
+            {
+                .atlas =
+                    {
+                        .texture = 1,
+                        .columns = 4,
+                        .rows = 4,
+                    },
+            },
     };
-    MisoTilemap *const tilemap = miso_tilemap_create(scene, &tilemap_desc);
+    MisoTilemap *const tilemap = miso_tile_scene_create_tilemap(scene, &tilemap_desc);
     if (!tilemap) {
         miso_tile_scene_destroy(scene);
         return failf("failed to create tilemap");
     }
 
     if (miso_tilemap_get_tile(tilemap, 0, 0) != MISO_TILE_EMPTY || miso_tilemap_has_tile(tilemap, 0, 0)) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("expected new tilemap cells to initialize empty");
     }
@@ -203,7 +208,6 @@ static int run_tile_scene_placement_case(void) {
     };
 
     if (miso_tile_scene_check_placement(scene, tilemap, &query) != MISO_TILE_PLACE_OK) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("expected initial tile placement to be valid");
     }
@@ -220,20 +224,17 @@ static int run_tile_scene_placement_case(void) {
         .game_ref = 99,
     };
     if (miso_tile_scene_place_object(scene, tilemap, &object, &object_id) != MISO_OK || object_id == 0) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("failed to place tile object");
     }
 
     if ((miso_tile_scene_check_placement(scene, tilemap, &query) & MISO_TILE_PLACE_OCCUPIED) == 0) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("expected occupied placement to report occupancy");
     }
 
     MisoTileObjectId picked_id = 0;
     if (!miso_tile_scene_pick_object_at_tile(scene, 3, 3, &picked_id) || picked_id != object_id) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("failed to pick placed tile object");
     }
@@ -247,13 +248,11 @@ static int run_tile_scene_placement_case(void) {
         .blocked_occupancy_mask = MISO_TILE_OCCUPANCY_OBJECT,
     };
     if (miso_tile_scene_move_object(scene, tilemap, &move_query, nullptr) != MISO_OK) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("failed to move tile object");
     }
 
     if (miso_tile_scene_check_placement(scene, tilemap, &query) != MISO_TILE_PLACE_OK) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("expected move to clear previous footprint occupancy");
     }
@@ -263,14 +262,12 @@ static int run_tile_scene_placement_case(void) {
     moved_query.tile_y = 2;
     moved_query.required_adjacent_tile_flags = MISO_TILE_FLAG_NONE;
     if ((miso_tile_scene_check_placement(scene, tilemap, &moved_query) & MISO_TILE_PLACE_OCCUPIED) == 0) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("expected move to occupy destination footprint");
     }
 
     picked_id = 0;
     if (!miso_tile_scene_pick_object_at_tile(scene, 6, 3, &picked_id) || picked_id != object_id) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("failed to pick moved tile object");
     }
@@ -286,7 +283,6 @@ static int run_tile_scene_placement_case(void) {
         .pickable = true,
     };
     if (miso_tile_scene_place_object(scene, tilemap, &blocker, &blocker_id) != MISO_OK || blocker_id == 0) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("failed to place move blocker");
     }
@@ -302,40 +298,34 @@ static int run_tile_scene_placement_case(void) {
     };
     if (miso_tile_scene_move_object(scene, tilemap, &blocked_move_query, &blocked_move) == MISO_OK ||
         (blocked_move.problems & MISO_TILE_PLACE_OCCUPIED) == 0) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("expected blocked move to fail with occupancy");
     }
 
     picked_id = 0;
     if (!miso_tile_scene_pick_object_at_tile(scene, 6, 3, &picked_id) || picked_id != object_id) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("expected failed move to restore source occupancy");
     }
 
     if (miso_tile_scene_remove_object(scene, object_id) != MISO_OK ||
         miso_tile_scene_check_placement(scene, tilemap, &moved_query) != MISO_TILE_PLACE_OK) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("failed to remove object and clear occupancy");
     }
 
     if (!miso_tilemap_clear_tile(tilemap, 2, 2) || miso_tilemap_has_tile(tilemap, 2, 2) ||
         miso_tilemap_get_tile(tilemap, 2, 2) != MISO_TILE_EMPTY) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("failed to clear tile to empty terrain");
     }
 
     if ((miso_tile_scene_check_placement(scene, tilemap, &query) & MISO_TILE_PLACE_MISSING_TERRAIN) == 0) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("expected empty tile footprint to report missing terrain");
     }
 
     if (miso_tile_scene_place_object(scene, tilemap, &object, nullptr) != MISO_ERR_INVALID_ARG) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("expected object placement on empty terrain to fail");
     }
@@ -343,12 +333,80 @@ static int run_tile_scene_placement_case(void) {
     miso_tilemap_clear(tilemap);
     if (miso_tilemap_get_tile(tilemap, 0, 0) != MISO_TILE_EMPTY ||
         miso_tilemap_get_flags(tilemap, 0, 0) != MISO_TILE_FLAG_NONE) {
-        miso_tilemap_destroy(tilemap);
         miso_tile_scene_destroy(scene);
         return failf("failed to clear tilemap to empty terrain");
     }
 
-    miso_tilemap_destroy(tilemap);
+    miso_tile_scene_destroy(scene);
+    return 0;
+}
+
+static int run_tile_scene_sprite_desc_case(void) {
+    const MisoTileSceneDesc scene_desc = {
+        .map = g_desc,
+    };
+    MisoTileScene *const scene = miso_tile_scene_create((MisoEngine *)(uintptr_t)1, &scene_desc);
+    if (!scene) {
+        return failf("failed to create tile scene");
+    }
+
+    const MisoTilemapDesc terrain_top_faces = {
+        .terrain_sprite =
+            {
+                .atlas =
+                    {
+                        .texture = 1,
+                        .columns = 4,
+                        .rows = 8,
+                        .cell_w_px = 32,
+                        .cell_h_px = 16,
+                    },
+                .render_w_px = 32,
+                .render_h_px = 16,
+            },
+    };
+    MisoTilemap *const tilemap = miso_tile_scene_create_tilemap(scene, &terrain_top_faces);
+    if (!tilemap) {
+        miso_tile_scene_destroy(scene);
+        return failf("failed to create 32x16 terrain tilemap");
+    }
+
+    if (!miso_tilemap_set_tile(tilemap, 0, 0, 31) || miso_tilemap_set_tile(tilemap, 0, 0, 32)) {
+        miso_tile_scene_destroy(scene);
+        return failf("terrain atlas grid did not validate tile ids");
+    }
+
+    const MisoTileObjectVisualDesc half_height_object = {
+        .visual_id = 42,
+        .sprite =
+            {
+                .atlas =
+                    {
+                        .texture = 1,
+                        .columns = 4,
+                        .rows = 8,
+                        .cell_w_px = 32,
+                        .cell_h_px = 16,
+                    },
+                .render_w_px = 32,
+                .render_h_px = 16,
+                .origin_y_px = 16,
+            },
+        .atlas_tile_id = 7,
+    };
+    if (miso_tile_scene_set_object_visual(scene, &half_height_object) != MISO_OK) {
+        miso_tile_scene_destroy(scene);
+        return failf("failed to register 32x16 object visual");
+    }
+
+    MisoTileObjectVisualDesc invalid_visual = half_height_object;
+    invalid_visual.visual_id = 43;
+    invalid_visual.atlas_tile_id = 32;
+    if (miso_tile_scene_set_object_visual(scene, &invalid_visual) != MISO_ERR_INVALID_ARG) {
+        miso_tile_scene_destroy(scene);
+        return failf("expected out-of-range object atlas tile id to fail");
+    }
+
     miso_tile_scene_destroy(scene);
     return 0;
 }
@@ -397,21 +455,19 @@ static int run_tile_overlay_buffer_case(void) {
     const MisoTileOverlayDesc overlay_desc = {
         .clear_rgba8 = 0x00000000u,
     };
-    MisoTileOverlay *const overlay = miso_tile_overlay_create(scene, &overlay_desc);
+    MisoTileOverlay *const overlay = miso_tile_scene_create_overlay(scene, &overlay_desc);
     if (!overlay) {
         miso_tile_scene_destroy(scene);
         return failf("failed to create tile overlay");
     }
 
     if (miso_tile_overlay_get_tile_rgba8(overlay, 2, 3) != 0x00000000u) {
-        miso_tile_overlay_destroy(overlay);
         miso_tile_scene_destroy(scene);
         return failf("overlay did not initialize to clear color");
     }
 
     if (!miso_tile_overlay_set_tile_rgba8(overlay, 2, 3, 0x00FF00CCu) ||
         miso_tile_overlay_get_tile_rgba8(overlay, 2, 3) != 0x00FF00CCu) {
-        miso_tile_overlay_destroy(overlay);
         miso_tile_scene_destroy(scene);
         return failf("overlay set/get tile failed");
     }
@@ -419,19 +475,16 @@ static int run_tile_overlay_buffer_case(void) {
     const MisoTileFootprint footprint = {.width = 2, .height = 2, .anchor_x = 0, .anchor_y = 0};
     miso_tile_overlay_fill_footprint(overlay, 4, 4, footprint, 0xFF000080u);
     if (miso_tile_overlay_get_tile_rgba8(overlay, 5, 5) != 0xFF000080u) {
-        miso_tile_overlay_destroy(overlay);
         miso_tile_scene_destroy(scene);
         return failf("overlay footprint fill failed");
     }
 
     miso_tile_overlay_clear(overlay, 0x11223344u);
     if (miso_tile_overlay_get_tile_rgba8(overlay, 5, 5) != 0x11223344u) {
-        miso_tile_overlay_destroy(overlay);
         miso_tile_scene_destroy(scene);
         return failf("overlay clear failed");
     }
 
-    miso_tile_overlay_destroy(overlay);
     miso_tile_scene_destroy(scene);
     return 0;
 }
@@ -441,7 +494,7 @@ int main(const int argc, const char *const *const argv) {
         fprintf(stderr,
                 "usage: %s --case "
                 "<tile-to-world|world-to-tile-center|world-to-tile-floor-boundary|tile-scene-placement|"
-                "tile-scene-fractional-coords|tile-overlay-buffer>\n",
+                "tile-scene-sprite-desc|tile-scene-fractional-coords|tile-overlay-buffer>\n",
                 argv[0]);
         return 2;
     }
@@ -457,6 +510,9 @@ int main(const int argc, const char *const *const argv) {
     }
     if (SDL_strcmp(argv[2], "tile-scene-placement") == 0) {
         return run_tile_scene_placement_case();
+    }
+    if (SDL_strcmp(argv[2], "tile-scene-sprite-desc") == 0) {
+        return run_tile_scene_sprite_desc_case();
     }
     if (SDL_strcmp(argv[2], "tile-scene-fractional-coords") == 0) {
         return run_tile_scene_fractional_coords_case();

@@ -2,7 +2,6 @@
 #include "miso_camera.h"
 #include "miso_iso.h"
 #include "miso_tile_scene.h"
-#include "miso_world.h"
 
 #include <SDL3/SDL.h>
 #include <stdarg.h>
@@ -11,7 +10,6 @@
 
 typedef struct PickFixture {
     MisoEngine engine;
-    MisoWorld *world;
     MisoTileScene *tile_scene;
     MisoCameraId camera_id;
     int logical_width;
@@ -83,8 +81,7 @@ static bool pick_fixture_init(PickFixture *const fixture,
         return false;
     }
 
-    fixture->world = miso_world_create(&fixture->engine, &desc);
-    return fixture->world != NULL;
+    return true;
 }
 
 static void pick_fixture_shutdown(PickFixture *const fixture) {
@@ -92,7 +89,6 @@ static void pick_fixture_shutdown(PickFixture *const fixture) {
         return;
     }
 
-    miso_world_destroy(fixture->world);
     miso_tile_scene_destroy(fixture->tile_scene);
     SDL_free(fixture->engine.cameras);
     SDL_memset(fixture, 0, sizeof(*fixture));
@@ -129,19 +125,20 @@ testbed_pick_from_logical_mouse(const PickFixture *const fixture, const int logi
     return (SDL_Point){.x = tile_x, .y = tile_y};
 }
 
-static bool world_pick_from_screen_pixels(const PickFixture *const fixture,
+static bool scene_pick_from_screen_pixels(const PickFixture *const fixture,
                                           int const screen_x,
                                           int const screen_y,
                                           SDL_Point *const out_tile) {
-    int tile_x = 0;
-    int tile_y = 0;
-    if (!miso_world_screen_to_tile(
-            fixture->world, &fixture->engine, fixture->camera_id, screen_x, screen_y, &tile_x, &tile_y)) {
+    const MisoVec2 world_position =
+        miso_camera_screen_to_world(&fixture->engine, fixture->camera_id, screen_x, screen_y);
+    float tile_x = 0.0f;
+    float tile_y = 0.0f;
+    if (!miso_tile_scene_world_to_tile(fixture->tile_scene, world_position.x, world_position.y, &tile_x, &tile_y)) {
         return false;
     }
 
     if (out_tile) {
-        *out_tile = (SDL_Point){.x = tile_x, .y = tile_y};
+        *out_tile = (SDL_Point){.x = (int)SDL_floorf(tile_x), .y = (int)SDL_floorf(tile_y)};
     }
     return true;
 }
@@ -180,14 +177,14 @@ static int run_world_pixel_parity_case(void) {
         const SDL_Point screen_px = screen_pixel_for_tile_center(&fixture, sample.x, sample.y);
         SDL_Point picked = {-1, -1};
 
-        if (!world_pick_from_screen_pixels(&fixture, screen_px.x, screen_px.y, &picked)) {
+        if (!scene_pick_from_screen_pixels(&fixture, screen_px.x, screen_px.y, &picked)) {
             pick_fixture_shutdown(&fixture);
-            return failf("world pixel path reported out-of-bounds for tile (%d, %d)", sample.x, sample.y);
+            return failf("scene pixel path reported out-of-bounds for tile (%d, %d)", sample.x, sample.y);
         }
 
         if (picked.x != sample.x || picked.y != sample.y) {
             pick_fixture_shutdown(&fixture);
-            return failf("world pixel path picked (%d, %d) for tile (%d, %d)", picked.x, picked.y, sample.x, sample.y);
+            return failf("scene pixel path picked (%d, %d) for tile (%d, %d)", picked.x, picked.y, sample.x, sample.y);
         }
     }
 
@@ -210,7 +207,7 @@ static int run_cafe_hidpi_case(void) {
         const int normalized_px_y = (int)SDL_lroundf((float)logical_y * fixture.pixel_ratio);
         SDL_Point picked = {-1, -1};
 
-        if (!world_pick_from_screen_pixels(&fixture, normalized_px_x, normalized_px_y, &picked)) {
+        if (!scene_pick_from_screen_pixels(&fixture, normalized_px_x, normalized_px_y, &picked)) {
             pick_fixture_shutdown(&fixture);
             return failf("cafe hidpi path reported out-of-bounds for tile (%d, %d)", sample.x, sample.y);
         }

@@ -228,6 +228,9 @@ if(MISO_BUILD_TESTS)
     add_test(NAME miso_tile_scene_placement
         COMMAND miso_engine_tests --case tile-scene-placement
     )
+    add_test(NAME miso_tile_scene_sprite_desc
+        COMMAND miso_engine_tests --case tile-scene-sprite-desc
+    )
     add_test(NAME miso_tile_scene_fractional_coords
         COMMAND miso_engine_tests --case tile-scene-fractional-coords
     )
